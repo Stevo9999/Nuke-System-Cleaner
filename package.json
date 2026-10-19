@@ -1,7 +1,7 @@
 {
   "name": "nuke-system-cleaner",
   "productName": "Nuke System Cleaner",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Windows uninstaller helper: finds program leftovers and junk, with safety checks and a deliberate 3D confirmation before anything is deleted.",
   "license": "PolyForm-Noncommercial-1.0.0",
   "author": "Stevo9999",
