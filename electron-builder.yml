@@ -1,4 +1,4 @@
-appId: local.nuke-uninstaller
+﻿appId: local.nuke-uninstaller
 productName: Nuke-Uninstaller
 asar: false
 directories:
@@ -25,11 +25,15 @@ win:
       arch: x64
   requestedExecutionLevel: asInvoker
 portable:
-  artifactName: Nuke-Uninstaller-Portable-${version}.exe
+  artifactName: Nuke-Uninstaller-Portable.exe
 nsis:
   oneClick: false
   perMachine: true
-  allowToChangeInstallationDirectory: false
+  allowToChangeInstallationDirectory: true
   allowElevation: true
-  createDesktopShortcut: true
-  artifactName: Nuke-Uninstaller-Setup-${version}.exe
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  runAfterFinish: true
+  deleteAppDataOnUninstall: false
+  license: build/license.txt
+  artifactName: Install-Nuke-Uninstaller.exe

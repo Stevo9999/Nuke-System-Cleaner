@@ -1,7 +1,7 @@
 {
   "name": "nuke-uninstaller",
   "productName": "Nuke-Uninstaller",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Windows uninstaller helper: finds program leftovers and junk, with safety checks and a deliberate 3D confirmation before anything is deleted.",
   "license": "PolyForm-Noncommercial-1.0.0",
   "author": "Stevo9999",

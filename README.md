@@ -1,4 +1,4 @@
-# Nuke-Uninstaller
+﻿# Nuke-Uninstaller
 
 A Windows program that helps you **remove programs and the junk they leave behind**, with safety checks and a deliberately dramatic confirmation (a 3D key, a glass cover and a big red button) so nothing is deleted by accident.
 
@@ -25,10 +25,18 @@ It runs as a normal user, needs no account and no internet connection, and sends
 
 ## Download
 
-Get the latest zip from the **Releases** page of this repository. It contains two programs; pick one:
+**One download is all you need.** Everything is built in: you do **not** need Node.js, npm, Electron, a runtime, or any other download or internet connection to use the program.
 
-* **`Nuke-Uninstaller-Portable-<version>.exe`**: no install. Run it from anywhere, including a USB drive. Administrator mode is not available from this version.
-* **`Nuke-Uninstaller-Setup-<version>.exe`**: a normal installer. It installs for all users in `C:\Program Files\Nuke-Uninstaller` (Windows asks for administrator approval once, to install). Needed if you want the optional administrator mode.
+On the **Releases** page of this repository you can download either of these single files, or the zip that holds both plus the documents:
+
+* `Install-Nuke-Uninstaller.exe` (about 97 MB): the setup wizard, a single file.
+* `Nuke-Uninstaller-Portable.exe` (about 97 MB): the no-install program, a single file.
+* `Nuke-Uninstaller-<version>-windows-x64.zip`: both of the above plus the license, notices and a short read-me.
+
+If you took the zip, unzip it and then either:
+
+* **Install:** double-click **`Install-Nuke-Uninstaller.exe`** (or `Install.bat`). A setup wizard opens: read and accept the terms, choose the install folder (the default is `C:\Program Files\Nuke-Uninstaller`), click Install. It adds desktop and Start-menu shortcuts and offers to start the program. Windows asks for permission once. To remove it later use Windows Settings > Apps > Installed apps. The setup wizard lets you choose the install folder. The optional administrator mode is only offered when it is installed under `C:\Program Files`.
+* **No install:** double-click **`Nuke-Uninstaller-Portable.exe`**. It is completely standalone: it needs no installer, no other file and no install step, and runs from anywhere, including a USB drive. Administrator mode is not available from this version.
 
 Requirements: Windows 10 or 11, 64-bit. It was developed and tested on Windows 11.
 
@@ -66,15 +74,16 @@ More detail for technical readers: [docs/TECHNICAL.md](docs/TECHNICAL.md) and [d
 
 ## Disclaimer
 
-**This software is provided "as is", without warranty of any kind**, express or implied, including but not limited to merchantability, fitness for a particular purpose and non-infringement. **You use it at your own risk.**
+**Please read this before you delete anything.**
 
-* Deleting is **permanent**. The author is **not liable** for any data loss, system damage, lost programs or settings, or any other harm resulting from using this software or from errors in it, even if you followed the instructions.
-* Uninstalling programs and removing Windows apps can break things that depend on them. Read each confirmation before you click.
-* A system restore point is not a backup of your personal files. **Back up anything important first.**
-* This is an independent hobby project. It is **not affiliated with, endorsed by or sponsored by** Microsoft or any other company. Windows, Microsoft Store, Edge, Chrome, Firefox, Brave, Opera and other names are trademarks of their owners, used only to say what the software works with.
-* This is not legal, financial or professional advice.
+* Nuke-Uninstaller is provided "as is", without any warranty. It is a free hobby project and you use it at your own risk.
+* It deletes files permanently. Deleted items do not go to the Recycle Bin. A Windows restore point can bring back Windows settings and installed programs, but it cannot bring back your personal files. Back up anything important before you use this program.
+* Uninstalling a program or removing a Windows app can stop other software that depends on it from working. Read each confirmation before you continue.
+* I AM NOT LIABLE. To the fullest extent the law allows, the author is not liable for any loss or damage of any kind that results from using, or from not being able to use, this program. That includes lost or deleted files, lost data, damaged or unbootable systems, lost settings, lost programs, and lost time or money. It makes no difference whether the damage is direct or indirect, whether it comes from a mistake in the program, or whether the author was told it might happen. By using the program you accept this and agree not to hold the author responsible.
+* This project is independent. It is not made, endorsed or sponsored by Microsoft or any other company. Names such as Windows, Edge, Chrome and Firefox belong to their owners and are used only to say what the program works with.
+* Nothing here is legal, financial or professional advice.
 
-If you are not comfortable with any of this, do not use the software.
+If you do not agree with this, please do not use the program.
 
 ## License
 
@@ -85,21 +94,23 @@ Nuke-Uninstaller is free to use, copy and share for **noncommercial** purposes u
 * You may **not** sell it, charge for it or for access to it, or use it as part of a business. Nobody may charge money for this program.
 * No warranty (see the disclaimer above).
 
-This is a "source-available" license, not an OSI-approved open-source license, because it limits commercial use. The author keeps the rights not granted here. (Copyright exists automatically for anything a person writes; this license is how that right is shared for free, with the no-selling condition.) Only the license text above is binding; this summary is not legal advice.
+This is a "source-available" license, not an OSI-approved open-source license, because it limits commercial use. The author keeps the rights not granted here. (Copyright exists automatically for anything a person writes; this license is how that right is shared for free, with the no-selling condition.) Only the license text itself is binding; this summary is not legal advice. (The license text contains a made-up example notice naming "Yoyodyne, Inc." and example.com. That is part of the standard PolyForm text and only shows what a notice looks like; it is not ours.)
 
 It includes or builds with third-party software that keeps **its own** license (those licenses do not change, and they are not restricted by the noncommercial rule above): Electron, Chromium and Node.js, three.js, and sound effects from Freesound.org released under CC0, among others. The full list with copyright lines and license texts is in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and on the **Credits and licenses** screen inside the app. The installed program also includes `LICENSE.electron.txt` and `LICENSES.chromium.html`.
 
 ## Build from source
 
-Needs Windows, Node.js 22 or newer and git.
+**You do not need this to use the program** (see Download above). This is only for people who want to read, change or rebuild the code. It needs Windows, Node.js 22 or newer and git, and it downloads the build tools and Electron from the internet.
 
 ```powershell
 git clone https://github.com/Stevo9999/Nuke-Uninstaller.git
 cd Nuke-Uninstaller
-npm ci                    # downloads Electron and the build tools
+npm ci                    # installs the build tools
+node node_modules/electron/install.js   # downloads the Electron program (newer npm versions skip this step)
 npm start                 # run the app from source
 npm test                  # run the automated tests (about 700)
-npx electron-builder --win --x64   # builds the portable and installer programs into .\release
+npx electron-builder --win --x64   # builds the one-click installer and the portable program into .\release
+powershell -File scripts\make-release-zip.ps1   # packs them into the release zip
 ```
 
 Run the tests with `node --test --test-concurrency=1` from PowerShell (Git Bash can break the folder-link tests).
