@@ -871,8 +871,149 @@ function enterUnlocked() {
   siren(true, 1.4);
 }
 
+/* ================= the computer that gets blown up ================= */
+// A small low-poly desk computer (monitor, tower, keyboard, mouse) built from primitives and one generated canvas texture: no models, no files.
+// It only reacts to the red button AFTER the server has accepted the confirm (pcStart() is called from press()); it never touches the server,
+// the lock, the countdown or the gating. Everything it creates for the effect is disposed when the sequence ends.
+const PC_FLOOR = FLOOR_Y + 8;   // the desk top, left of the table and a little behind it, inside the default camera view
+const PC_S = 1.25, PC_POS = new THREE.Vector3(-18, PC_FLOOR, -13), PC_ROT = 0.45, PC_HX = 5.5 * PC_S, PC_HZ = 3.5 * PC_S;
+const pc = { group: new THREE.Group(), parts: [], screen: null, screenMat: null, state: 'idle', t: 0, boomAt: 0.9, centre: new THREE.Vector3(),
+  flying: [], fx: null, reduced: false };
+pc.group.position.copy(PC_POS); pc.group.rotation.y = PC_ROT; pc.group.scale.setScalar(PC_S); scene.add(pc.group);
+{
+  const beige = M(THREE.MeshStandardMaterial, { color: 0xd9d3c3, roughness: 0.7, envMapIntensity: 0.25 });
+  const grey = M(THREE.MeshStandardMaterial, { color: 0x2b2d33, roughness: 0.55, envMapIntensity: 0.3 });
+  const deskMat = M(THREE.MeshStandardMaterial, { color: 0x6f573f, roughness: 0.65, envMapIntensity: 0.2 });
+  const box = (w, h, d, x, y, z, mat, part = true) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); m.castShadow = m.receiveShadow = true;
+    pc.group.add(m); if (part) pc.parts.push(m); return m;
+  };
+  // the desk stays standing
+  box(PC_HX * 2, 0.6, PC_HZ * 2, 0, -0.3, 0, deskMat, false);
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) box(0.6, 7.4, 0.6, sx * (PC_HX - 0.6), -4.3, sz * (PC_HZ - 0.6), deskMat, false);
+  box(2.8, 0.3, 2.2, -1.8, 0.15, -0.2, grey);                 // monitor foot
+  box(0.7, 1.3, 0.6, -1.8, 0.9, -0.3, grey);                  // neck
+  box(5.6, 4.0, 0.7, -1.8, 3.5, 0, beige);                    // monitor shell
+  box(2.3, 4.9, 4.4, 3.2, 2.45, -0.2, beige);                 // tower
+  box(1.7, 0.3, 0.1, 3.2, 3.9, 2.05, grey); box(1.7, 0.3, 0.1, 3.2, 3.3, 2.05, grey);   // drive slots
+  box(4.2, 0.28, 1.5, -1.8, 0.14, 2.5, grey);                 // keyboard
+  box(0.55, 0.22, 0.85, 1.0, 0.11, 2.7, grey);                // mouse
+  const led = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, 0.1), new THREE.MeshBasicMaterial({ color: 0x38ff6a }));
+  led.position.set(3.9, 1.2, 2.05); pc.group.add(led); pc.parts.push(led);
+  // the screen: a small generated desktop picture; swapped for a red warning just before it blows
+  const cvs = document.createElement('canvas'); cvs.width = 128; cvs.height = 96; const g = cvs.getContext('2d');
+  g.fillStyle = '#1d4f7a'; g.fillRect(0, 0, 128, 96); g.fillStyle = '#e8eef4'; g.fillRect(10, 8, 62, 42); g.fillStyle = '#3b7bb0'; g.fillRect(10, 8, 62, 8);
+  g.fillStyle = '#cfd8e0'; g.fillRect(52, 36, 64, 34); g.fillStyle = '#3b7bb0'; g.fillRect(52, 36, 64, 7); g.fillStyle = '#10243a'; g.fillRect(0, 86, 128, 10);
+  const tex = new THREE.CanvasTexture(cvs); tex.colorSpace = THREE.SRGBColorSpace;
+  pc.screenMat = new THREE.MeshBasicMaterial({ map: tex });
+  pc.screen = new THREE.Mesh(new THREE.PlaneGeometry(4.8, 3.1), pc.screenMat); pc.screen.position.set(-1.8, 3.5, 0.37);
+  pc.group.add(pc.screen); pc.parts.push(pc.screen);
+  pc.shardMats = [beige, grey];
+}
+function pcWarnTexture() {
+  const c = document.createElement('canvas'); c.width = 128; c.height = 96; const g = c.getContext('2d');
+  g.fillStyle = '#8a0000'; g.fillRect(0, 0, 128, 96); g.fillStyle = '#ffe14a'; g.beginPath(); g.moveTo(64, 10); g.lineTo(100, 70); g.lineTo(28, 70); g.closePath(); g.fill();
+  g.fillStyle = '#8a0000'; g.fillRect(61, 30, 6, 24); g.fillRect(61, 58, 6, 6);
+  g.fillStyle = '#fff'; g.font = 'bold 13px sans-serif'; g.textAlign = 'center'; g.fillText('FATAL ERROR', 64, 88);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+function pcStart() {
+  if (pc.state !== 'idle') return;
+  pc.state = 'warn'; pc.t = 0;
+  pc.reduced = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+  pc.warnTex = pcWarnTexture(); pc.screenMat.map = pc.warnTex; pc.screenMat.needsUpdate = true;
+  pc.centre.set(PC_POS.x + Math.sin(PC_ROT) * 2 * PC_S, PC_FLOOR + 2.6 * PC_S, PC_POS.z + Math.cos(PC_ROT) * 2 * PC_S);
+}
+function pcBoom() {
+  pc.state = 'boom'; pc.boomT = pc.t;
+  const fx = pc.fx = { disposables: [], objs: [] };
+  const own = (o, ...d) => { fx.objs.push(o); fx.disposables.push(...d); scene.add(o); return o; };
+  const light = new THREE.PointLight(0xffa040, 0, 90, 1.4); light.position.copy(pc.centre); fx.light = own(light);
+  fx.peak = 4500;
+  if (pc.reduced) { fx.reducedOnly = true; sfx('blast', 0.7); return; }    // reduced motion: a flash only, nothing flies, no rings or smoke
+  sfx('blast', 0.7);
+  const coreG = new THREE.SphereGeometry(1, 16, 12), coreM = new THREE.MeshBasicMaterial({ color: 0xfff0c0, transparent: true, depthWrite: false });
+  fx.core = own(new THREE.Mesh(coreG, coreM), coreG, coreM); fx.core.position.copy(pc.centre);
+  const ringG = new THREE.RingGeometry(0.85, 1, 64), ringM = new THREE.MeshBasicMaterial({ color: 0xffe0a8, transparent: true, depthWrite: false, side: THREE.DoubleSide });
+  fx.ringH = own(new THREE.Mesh(ringG, ringM), ringG, ringM); fx.ringH.rotation.x = -Math.PI / 2; fx.ringH.position.set(pc.centre.x, PC_FLOOR + 0.2, pc.centre.z);
+  fx.ringV = new THREE.Mesh(ringG, ringM); fx.ringV.position.copy(pc.centre); fx.objs.push(fx.ringV); scene.add(fx.ringV);
+  // mushroom-ish smoke: a stem of spheres and a round cap, two shared materials, one shared geometry
+  const smG = new THREE.SphereGeometry(1, 12, 8);
+  const stemM = new THREE.MeshStandardMaterial({ color: 0x4a4540, roughness: 1, transparent: true, emissive: 0xff5a10, emissiveIntensity: 1.2, depthWrite: false });
+  const capM = new THREE.MeshStandardMaterial({ color: 0x77706a, roughness: 1, transparent: true, emissive: 0xff7a20, emissiveIntensity: 1.2, depthWrite: false });
+  fx.smoke = { stem: [], cap: [], stemM, capM };
+  const smoke = new THREE.Group(); smoke.position.set(pc.centre.x, PC_FLOOR + 0.5, pc.centre.z); own(smoke, smG, stemM, capM);
+  for (let i = 0; i < 5; i++) { const s = new THREE.Mesh(smG, stemM); smoke.add(s); fx.smoke.stem.push(s); }
+  for (let i = 0; i < 9; i++) { const s = new THREE.Mesh(smG, capM); smoke.add(s); fx.smoke.cap.push(s); }
+  // pieces: every part of the computer is thrown out, plus a handful of loose shards
+  scene.updateMatrixWorld(true);
+  const throwIt = (m, big) => {
+    const dir = m.getWorldPosition(new THREE.Vector3()).sub(pc.centre); dir.y = 0.2; if (dir.lengthSq() < 1e-4) dir.set(0, 0, 1); dir.normalize();
+    const sp = big ? 7 + Math.random() * 8 : 10 + Math.random() * 14;
+    pc.flying.push({ m, vel: new THREE.Vector3(dir.x * sp * 0.5, (big ? 22 : 18) + Math.random() * 16, dir.z * sp * 0.7 + 6 + Math.random() * 5),
+      spin: new THREE.Vector3((Math.random() - 0.5) * 16, (Math.random() - 0.5) * 16, (Math.random() - 0.5) * 16), half: big ? 0.5 : 0.25, moving: true });
+  };
+  for (const m of pc.parts) { scene.attach(m); throwIt(m, true); }
+  const shardG = new THREE.BoxGeometry(1, 1, 1); fx.disposables.push(shardG);
+  for (let i = 0; i < 26; i++) {
+    const m = new THREE.Mesh(shardG, pc.shardMats[i % 2]); const k = 0.3 + Math.random() * 0.7;
+    m.scale.set(k, k * (0.4 + Math.random()), k * (0.5 + Math.random() * 0.8)); m.position.copy(pc.centre); m.position.y += Math.random() * 2;
+    m.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3); scene.add(m); fx.objs.push(m); throwIt(m, false);
+  }
+  pc.screenMat.color.set(0xffffff);
+}
+function pcDispose() {
+  const fx = pc.fx; if (!fx) return;
+  for (const o of fx.objs) scene.remove(o);
+  for (const d of fx.disposables) d.dispose();   // loose shards share one geometry; the computer's own wreck stays where it landed
+  fx.objs.length = 0; pc.fx = null; pc.state = 'done';
+}
+const sstep = (a, b, x) => { const u = clamp((x - a) / (b - a), 0, 1); return u * u * (3 - 2 * u); };
+function pcUpdate(dt) {
+  if (pc.state === 'idle' || pc.state === 'done') return;
+  pc.t += dt;
+  if (pc.state === 'warn') {                       // the screen blinks a red warning and the monitor shudders
+    pc.screenMat.color.setScalar(Math.sin(pc.t * 40) > 0 ? 1 : 0.45);
+    if (!pc.reduced) pc.group.position.set(PC_POS.x + (Math.random() - 0.5) * 0.18, PC_POS.y, PC_POS.z + (Math.random() - 0.5) * 0.18);
+    if (pc.t >= pc.boomAt) { pc.group.position.copy(PC_POS); pcBoom(); }
+    return;
+  }
+  const fx = pc.fx, u = pc.t - pc.boomT;
+  if (fx) {
+    fx.light.intensity = fx.peak * Math.exp(-u * 5);
+    if (fx.reducedOnly) { if (u > 1) pcDispose(); return; }
+    fx.core.scale.setScalar(1 + u * 14); fx.core.material.opacity = Math.max(0, 1 - u * 3.5); fx.core.visible = fx.core.material.opacity > 0;
+    const rs = 1 + u * 22, ro = Math.max(0, 0.9 - u * 1.1);
+    fx.ringH.scale.setScalar(rs); fx.ringV.scale.setScalar(rs); fx.ringH.material.opacity = ro; fx.ringH.visible = fx.ringV.visible = ro > 0;
+    const sm = fx.smoke, k = u / 4.4, h = 2 + k * 11, rad = 1.2 + k * 4.5;
+    const op = Math.min(1, u * 5) * (1 - sstep(0.6, 1, k)) * 0.85, glow = Math.max(0, 1.2 - u * 0.9);
+    sm.stemM.opacity = sm.capM.opacity = op; sm.stemM.emissiveIntensity = sm.capM.emissiveIntensity = glow;
+    sm.stem.forEach((s, i) => { s.position.set(Math.sin(i * 2.1) * 0.5, (i / 4) * h * 0.85, Math.cos(i * 2.1) * 0.5); s.scale.setScalar(1.1 + k * 1.2 + (1 - i / 4) * 0.5); });
+    sm.cap.forEach((s, i) => {
+      const a = (i / 8) * Math.PI * 2, top = i === 8;
+      s.position.set(top ? 0 : Math.cos(a) * rad, h + (top ? 1.4 + k * 1.5 : Math.sin(i * 1.7) * 0.5), top ? 0 : Math.sin(a) * rad); s.scale.setScalar(1.7 + k * 2.2);
+    });
+  }
+  for (const f of pc.flying) {
+    if (!f.moving) continue;
+    const m = f.m, py = m.position.y;
+    f.vel.y -= 60 * dt; m.position.addScaledVector(f.vel, dt);
+    m.rotation.x += f.spin.x * dt; m.rotation.y += f.spin.y * dt; m.rotation.z += f.spin.z * dt;
+    const onDesk = Math.abs(m.position.x - PC_POS.x) <= PC_HX && Math.abs(m.position.z - PC_POS.z) <= PC_HZ;
+    let s = onDesk ? PC_FLOOR : FLOOR_Y;
+    if (!onDesk && py >= surfaceY(m.position.x, m.position.z) + f.half) s = surfaceY(m.position.x, m.position.z);   // lands on the table only when it arrives from above
+    if (m.position.y < s + f.half) {
+      m.position.y = s + f.half; f.vel.y *= -0.3; f.vel.x *= 0.55; f.vel.z *= 0.55; f.spin.multiplyScalar(0.5);
+      if (f.vel.length() < 1.5) { f.moving = false; m.rotation.x = Math.round(m.rotation.x / (Math.PI / 2)) * Math.PI / 2; m.rotation.z = Math.round(m.rotation.z / (Math.PI / 2)) * Math.PI / 2; }
+    }
+    if (Math.abs(m.position.x) > ROOM_W / 2 - 1) { m.position.x = Math.sign(m.position.x) * (ROOM_W / 2 - 1); f.vel.x *= -0.3; }
+    if (m.position.z > ROOM_FRONT - 1 || m.position.z < ROOM_BACK + 1) { m.position.z = clamp(m.position.z, ROOM_BACK + 1, ROOM_FRONT - 1); f.vel.z *= -0.3; }
+  }
+  if (u > 5.2) pcDispose();
+}
+
 /* ================= press, blast ================= */
-const cv = { vel: new THREE.Vector3(), spin: new THREE.Vector3(), flying: false };
+const cv ={ vel: new THREE.Vector3(), spin: new THREE.Vector3(), flying: false };
 let pressAt = 0, shake = 0;
 async function press() {
   if (stage !== 'unlocked') return;
@@ -891,6 +1032,7 @@ async function press() {
   setTimeout(() => sfx('flyover', 0.9), 400);
   setTimeout(() => sfx('whistle', 0.95), 3200);
   body.classList.add('pressed');
+  pcStart();   // the computer on the desk blows up (visual only: the server already accepted the confirm above)
   spring.visible = true; pressAt = performance.now();
   cv.flying = true; cv.vel.set(11 + Math.random() * 3, 32, -2 + Math.random() * 6); cv.spin.set(5 + Math.random() * 4, 2, -9 - Math.random() * 4);
   setTimeout(blast, 7000);
@@ -964,6 +1106,7 @@ function frame(now) {
     if (cap.position.y < capFloor) { cap.position.y = capFloor; cv.vel.y *= -0.3; cv.vel.x *= 0.6; cv.spin.multiplyScalar(0.5); if (cv.vel.length() < 1.5) cv.flying = false; }
     if (Math.abs(cap.position.x) > 44) cv.flying = false;
   }
+  pcUpdate(dt);
   if (spring.visible) {
     const u = (now - pressAt) / 1000;
     spring.scale.y = Math.max(0.05, 1.6 * (1 - Math.exp(-9 * u) * Math.cos(26 * u)) + 0.15 * Math.exp(-1.5 * u) * Math.sin(14 * u));
