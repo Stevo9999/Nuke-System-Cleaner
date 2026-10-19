@@ -14,7 +14,13 @@ This application is a basic file cleaner, but thrown together by AI with visual 
 
 It was written with the help of an AI coding assistant (Claude) and checked by an automated test suite and hand-testing on a real Windows 11 PC. It is a hobby project: treat it like any free tool from the internet and read the [disclaimer](#disclaimer) first.
 
-If you had to sum it up in one line: *a system cleaner, but with jingling keys.*
+What one early reviewer said about it:
+
+> "[A system cleaner] but with jingling keys."
+>
+> - an anonymous reviewer
+
+(The reviewer named another product; that name is replaced by the words in square brackets.)
 
 ## What it can do
 
