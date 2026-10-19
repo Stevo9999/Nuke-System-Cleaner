@@ -1,0 +1,39 @@
+{
+  "name": "nuke-uninstaller",
+  "productName": "Nuke-Uninstaller",
+  "version": "0.1.0",
+  "description": "Windows uninstaller helper: finds program leftovers and junk, with safety checks and a deliberate 3D confirmation before anything is deleted.",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "author": "Stevo9999",
+  "homepage": "https://github.com/Stevo9999/Nuke-Uninstaller#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Stevo9999/Nuke-Uninstaller.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Stevo9999/Nuke-Uninstaller/issues"
+  },
+  "keywords": [
+    "windows",
+    "uninstaller",
+    "cleaner",
+    "electron",
+    "leftovers"
+  ],
+  "private": true,
+  "type": "module",
+  "main": "app/main/main.mjs",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test --test-concurrency=1",
+    "fixture": "node fixture/make-fixture.mjs",
+    "start": "electron .",
+    "package": "node scripts/package.mjs"
+  },
+  "devDependencies": {
+    "electron": "44.5.1",
+    "electron-builder": "26.15.3"
+  }
+}

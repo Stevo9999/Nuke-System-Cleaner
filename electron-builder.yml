@@ -1,0 +1,35 @@
+appId: local.nuke-uninstaller
+productName: Nuke-Uninstaller
+asar: false
+directories:
+  output: release
+files:
+  - app/**
+  - lib/**
+  - vendor/**
+  - sounds/**
+  - cleanup.html
+  - cleanup-plain.html
+  - index.html
+  - run.mjs
+  - scan.mjs
+  - server.mjs
+  - package.json
+  - LICENSE
+  - THIRD_PARTY_NOTICES.md
+win:
+  target:
+    - target: portable
+      arch: x64
+    - target: nsis
+      arch: x64
+  requestedExecutionLevel: asInvoker
+portable:
+  artifactName: Nuke-Uninstaller-Portable-${version}.exe
+nsis:
+  oneClick: false
+  perMachine: true
+  allowToChangeInstallationDirectory: false
+  allowElevation: true
+  createDesktopShortcut: true
+  artifactName: Nuke-Uninstaller-Setup-${version}.exe

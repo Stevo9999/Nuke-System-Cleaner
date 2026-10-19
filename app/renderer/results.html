@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nuke-Uninstaller results</title>
+<link rel="stylesheet" href="app://ui/results.css">
+</head>
+<body>
+<main>
+<h1 id="title">Results</h1>
+<p id="notice" class="notice">Deleting is permanent. A restore point does not bring back your own files.</p>
+<p id="help" class="desc" hidden></p>
+<ul id="notes" class="notes"></ul>
+<div id="diff" class="diff" role="status" aria-live="polite"></div>
+<table id="found" class="found">
+<caption>Found items</caption>
+<thead><tr><th scope="col">Delete</th><th scope="col">Name</th><th scope="col">Size</th><th scope="col">Used by</th><th scope="col">How sure</th><th scope="col">Change</th></tr></thead>
+<tbody id="rows"></tbody>
+</table>
+<section id="report" class="report" hidden>
+<p id="report-none" class="desc" hidden></p>
+<details id="report-details">
+<summary id="report-sum">Shown only (not changed by this app): start-up programs and system folders. Click to show.</summary>
+<p class="desc">These are listed for your information. This app never changes or deletes them.</p>
+<ul id="report-list"></ul>
+</details>
+</section>
+<p id="admin" class="admin" hidden></p>
+<p id="error" class="error" role="alert" hidden></p>
+<p id="summary" class="summary" role="status" aria-live="polite"></p>
+<div class="buttons">
+<div class="action"><button id="cancel" type="button" aria-describedby="d-cancel">Cancel</button><p id="d-cancel" class="desc">Throw these results away and go back.</p></div>
+<div class="action"><button id="again" type="button" aria-describedby="d-again">Scan Again</button><p id="d-again" class="desc">Run the same scan again and show what changed since the first one.</p></div>
+<div class="action"><button id="delete" type="button" class="danger" disabled aria-describedby="d-delete">Delete them!</button><p id="d-delete" class="desc">Permanently deletes the ticked items. You will see a warning first.</p></div>
+</div>
+</main>
+<script type="module" src="app://ui/results.js"></script>
+</body>
+</html>

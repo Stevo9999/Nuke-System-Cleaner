@@ -1,0 +1,650 @@
+// app/main/controller.mjs
+// The main process's decision maker behind the IPC handlers (one method per channel, see ipc.mjs).
+// Safety rules owned here:
+//   - one operation at a time ("busy");
+//   - the renderer only sends ids; every id is re-checked against THIS controller's last scan (selectable, known group and
+//     confidence, path present, not a protected root), companions are added here, and anything odd refuses the whole request;
+//   - the selection is frozen and hashed by the engine (buildSelection), re-validated on disk (revalidate), and only then
+//     handed to the one-shot server (startRun) with adminContents = (identity.elevated === true), a strict boolean;
+//   - Phase 1b, Rulings R36/R41: elevated, ONLY items of kind "file" whose parent folder is exactly one of the administrator
+//     folders (adminContentDirs) are accepted (no per-user items, no folders, no subfolders) and investigate scans are not
+//     run; standard mode refuses anything under an administrator folder;
+//   - adminRelaunch: refused when already elevated or busy; the relaunch itself (UAC) is done by main through `relaunch`;
+//   - the one-time url (it carries the token) goes to ui.openRitual and nowhere else: it is not kept, logged or sent;
+//   - errors ("busy" is BUSY_MESSAGE): calls from the MAIN window report through ONE channel, the phase event ({ phase: "error", detail: fixed text })
+//     and then resolve { ok: false }; calls from the RESULTS window (scanAgain, delete refusals, results:get) reject with a
+//     fixed message ("busy", "refused" or GENERIC_ERROR) that its own error line shows. No error text from the engine, the
+//     file system or a scan ever reaches a renderer (it can contain paths).
+import fs from "node:fs";
+import path from "node:path";
+import crypto from "node:crypto";
+import { loadSettings, saveSettings, appProtectedRoots, violatesRoots, readExclusions, saveExclusions, addExclusion, exclusionId, exclusionMatcher } from "./appdata.mjs";
+import { toView, diffScans, fmtBytes, displayText } from "./view-model.mjs";
+import { buildSelection, revalidate, startFrozenRun } from "../../run.mjs";
+import { createRestorePoint, RESTORE_MESSAGES, TIMEOUT_MESSAGE } from "../../lib/restore.mjs";
+import { adminContentDirs, within } from "../../lib/safepath.mjs";
+import { isLocked as fileIsLocked } from "../../lib/smartscan.mjs";
+import { changedAfter } from "../../lib/age.mjs";
+import { listPrograms, parseUninstallCommand, leftoverTarget, programRow } from "../../lib/programs.mjs";
+import { neverTouchPath } from "../../lib/never-touch.mjs";
+import { runUninstaller } from "../../lib/uninstall-run.mjs";
+import { listWindowsApps, removeWindowsApp } from "../../lib/winapps.mjs";
+import { toolList, openTool, isToolKey } from "../../lib/wintools.mjs";
+
+export const GENERIC_ERROR = "Something went wrong. Please try again.";
+export const BUSY_MESSAGE = "Another operation is still running. Please wait.";
+export const RELAUNCH_TIMEOUT_MESSAGE = "The administrator prompt did not finish.";
+export const RELAUNCH_CANCELLED_MESSAGE = "Administrator mode was not started: the Windows prompt was cancelled.";
+export const IDENTITY_UNKNOWN_MESSAGE = "Could not tell whether this app is running as administrator, so deleting is turned off.";
+export const ADMIN_INVESTIGATE_MESSAGE = "Investigating a program or folder is not available in administrator mode. Close this window and use standard mode for your own files.";
+export const ADMIN_BROWSERS_MESSAGE = "The Browsers cleaner is not available in administrator mode. Close this window and use standard mode for your own files.";
+const ID_RE = /^[0-9a-f]{16}$/;
+const SID_USER = /^S-1-5-21(-\d+){4}$/;
+const MAX_IDS = 5000;
+const TERMINAL = new Set(["done", "aborted", "expired", "failed"]);
+const SELECTABLE_GROUPS = new Set(["exclusive", "shared"]);
+const CONFIDENCES = new Set(["high", "medium", "low"]);
+const AUDIT_TAIL_BYTES = 16 * 1024 * 1024;
+
+const TEXT = Object.freeze({
+  scanFailed: "The scan could not be completed. Nothing was changed.",
+  nothingFound: "Scan finished. Nothing was found.",
+  review: "Scan finished.",
+  stopped: "Stopped. Nothing was deleted.",
+  cancelled: "Cancelled. Nothing was deleted.",
+  expired: "The app closed the confirmation automatically. Nothing was deleted.",
+  aborted: "The run was stopped before anything was deleted.",
+  changed: "Some selected items changed or are no longer safe to delete since the scan. Nothing was deleted. Please scan again.",
+  startFailed: "The delete step could not be started. Nothing was deleted.",
+  ritualFailed: "The confirm window could not be opened. Nothing was deleted.",
+  failed: "The delete step stopped with an error. Some items may already be gone; the rest were not touched.",
+  listFailed: "The list could not be read.",
+  uninstallFailed: "The uninstaller could not be run. Nothing was changed.",
+  uninstallDone: "The uninstaller finished. No install folder was known, so no leftover scan was run.",
+  appRemoved: "The app was removed for your account.",
+  appFailed: "The app could not be removed. Nothing was changed.",
+  doneNoAudit: "Finished. The details could not be read from the log, so the number of items and the freed space are not shown.",
+});
+
+class Refusal extends Error {}
+const refused = () => new Refusal("refused");
+const busyError = () => new Refusal(BUSY_MESSAGE);
+const safeError = e => (e instanceof Refusal ? e : new Error(GENERIC_ERROR));
+const plural = (n, one, many) => n + " " + (n === 1 ? one : many);
+
+// Every JSON line of runDir\nuke-audit.log whose runId matches, read from a bounded tail of the file (this run's lines
+// are the newest, so a long-lived log never stops a finished run from being reported). Odd lines are skipped.
+export function readAuditLines(runDir, runId, { maxBytes = AUDIT_TAIL_BYTES } = {}) {
+  let fd;
+  try {
+    const file = path.join(runDir, "nuke-audit.log");
+    const st = fs.lstatSync(file);
+    if (!st.isFile()) return [];
+    const len = Math.min(st.size, maxBytes);
+    const buf = Buffer.alloc(len);
+    fd = fs.openSync(file, "r");
+    let got = 0;
+    while (got < len) { const n = fs.readSync(fd, buf, got, len - got, st.size - len + got); if (n <= 0) break; got += n; }
+    let text = buf.toString("utf8", 0, got);
+    if (len < st.size) text = text.slice(text.indexOf("\n") + 1); // drop the partial first line
+    const out = [];
+    for (const line of text.split("\n")) {
+      if (!line.trim()) continue;
+      try { const o = JSON.parse(line); if (o && typeof o === "object" && o.runId === runId) out.push(o); } catch { /* skip */ }
+    }
+    return out;
+  } catch { return []; }
+  finally { if (fd !== undefined) { try { fs.closeSync(fd); } catch { /* ignore */ } } }
+}
+
+function doneSummary(lines) {
+  const done = [...lines].reverse().find(l => l && l.state === "done");
+  if (!done) return null;
+  const results = Array.isArray(done.results) ? done.results : [];
+  const count = s => results.filter(r => r && r.status === s).length;
+  const measured = done.measured === true;
+  const freedBytes = Number.isFinite(done.freedBytes) && done.freedBytes >= 0 ? done.freedBytes : 0;
+  return { deleted: count("deleted"), failed: count("failed"), skipped: count("skipped"), freedBytes, measured };
+}
+
+function doneText(s) {
+  const parts = [plural(s.deleted, "item deleted", "items deleted")];
+  if (s.failed) parts.push(s.failed + " could not be deleted");
+  if (s.skipped) parts.push(s.skipped + " skipped");
+  return parts.join(", ") + ". " + (s.measured ? "Free space went up by " + fmtBytes(s.freedBytes) + " (other programs can change this)." : "The freed space could not be measured.");
+}
+
+export function createController({
+  ui, paths, identity, runScan, restore = createRestorePoint, startRun = startFrozenRun, protectedPaths = [],
+  protectedRoots = appProtectedRoots(), readAudit = readAuditLines, pollMs = 500, relaunch = null, adminDirs = adminContentDirs,
+  profileRoot = null, // R45: main passes the user's profile folder; null/invalid => investigate items are refused (fail closed)
+  isLocked = fileIsLocked,
+  readPrograms = null, // () => listPrograms(regQuery): main passes it; null => the program list is unavailable
+  runProgramUninstaller = runUninstaller,
+  readApps = listWindowsApps,
+  removeApp = removeWindowsApp,
+  startTool = openTool, // (key) => Promise<{ ok }>: launches one built-in Windows tool from the fixed list in lib/wintools.mjs
+} = {}) {
+  // Ruling R44: only a real boolean counts. Anything else (null from readIdentity, missing, odd) is "unknown": scans still
+  // run (read-only, in their standard form) but delete is refused. `elevated` itself stays a strict boolean.
+  const identityKnown = !!identity && typeof identity.elevated === "boolean";
+  const elevated = identityKnown && identity.elevated === true;
+  // R46: the relauncher (makeRelaunchElevated) sets .allowed === true only for a packaged app under C:\Program Files.
+  const relaunchOffered = () => identityKnown && !elevated && typeof relaunch === "function" && relaunch.allowed === true;
+  const nk = p => { const s = path.resolve(p); return process.platform === "win32" ? s.toLowerCase() : s; };
+  // R36 + R41 (layer 2). Fails closed: an unreadable list refuses the item.
+  //   standard mode: nothing under an administrator folder;
+  //   administrator mode: ONLY files directly inside an administrator folder (no per-user items, no folders, no nesting).
+  function adminItemOk(it) {
+    let dirs;
+    try { dirs = adminDirs(); } catch { return false; }
+    if (!Array.isArray(dirs) || !dirs.every(d => typeof d === "string" && path.isAbsolute(d))) return false;
+    const under = dirs.some(d => within(it.path, d));
+    if (!elevated) return !under;
+    return under && it.kind === "file" && dirs.some(d => nk(path.dirname(it.path)) === nk(d)) && !dirs.some(d => nk(it.path) === nk(d));
+  }
+  // R45 (standard mode): picked / investigated items must lie inside the user's profile; another account could redirect an
+  // automatic delete of anything else. Smart Scan results keep their own location rules.
+  function profileOk(it) {
+    if (!last || !last.request) return false; // fail closed
+    if (last.request.kind === "smart") return true; // (the Browsers cleaner is a different kind: it needs the profile check below)
+    // Fail closed: an investigate item needs a valid absolute profile root, and the root itself is never an item.
+    if (typeof profileRoot !== "string" || profileRoot.length === 0 || !path.isAbsolute(profileRoot)) return false;
+    try { return within(it.path, profileRoot) && nk(it.path) !== nk(profileRoot); } catch { return false; }
+  }
+  // Hard never-touch list (lib/never-touch.mjs): Windows folders, Program Files, other accounts, account secrets. Checked when a
+  // selection is made and again on the frozen paths at delete time. Only the four administrator folders are let through, and
+  // only in administrator mode (adminItemOk still limits those to direct-child files).
+  const neverTouch = p => {
+    let dirs = [];
+    try { dirs = elevated ? adminDirs() : []; } catch { return "unreadable"; }
+    return neverTouchPath(p, { profile: profileRoot, allowedAdminDirs: Array.isArray(dirs) ? dirs : [] });
+  };
+  // The account SID is derived here from the identity read at startup; nothing from a renderer can set it.
+  const sid = identity && typeof identity.sid === "string" && SID_USER.test(identity.sid) ? identity.sid : null;
+  const appProtected = Array.isArray(protectedPaths) ? protectedPaths.filter(p => typeof p === "string") : [];
+
+  let programById = new Map(); // id -> program entry (kept here; a renderer only ever holds the id)
+  let appById = new Map();
+  let busy = null;          // null | "scan" | "pick" | "delete"
+  let scanAbort = null;     // AbortController of the running scan
+  let last = null;          // { request, result, diff, scanStartMs }
+  let ritualCtx = null;     // { server, close } while the embedded confirmation page is up (for ritualCancel)
+  let currentRun = null;    // the started run while a delete is in progress (for isDeleting)
+  let generation = 0;       // bumped by results:close; a scan that finishes under an older generation is dropped
+
+  const phase = p => { try { ui.sendPhase(p); } catch { /* window gone */ } };
+  const progress = p => {
+    try {
+      const fraction = p && typeof p.fraction === "number" && Number.isFinite(p.fraction) ? Math.min(1, Math.max(0, p.fraction)) : null;
+      const label = p && typeof p.label === "string" ? p.label.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " ").slice(0, 120) : "";
+      ui.sendProgress({ fraction, label });
+    } catch { /* window gone */ }
+  };
+  const take = kind => { if (busy) throw busyError(); busy = kind; };
+
+  // Exclusions (the user's never-touch list): folders the user said this app must never touch, read from settings.json each time they
+  // matter. An unreadable settings file means the list is unknown, so the operation fails closed (throws).
+  function exclusionsNow() {
+    const r = readExclusions(paths.settingsFile);
+    if (!r.ok) throw new Error("exclusions unknown");
+    return r.list;
+  }
+  const exclusionRows = list => list.map(p => ({ id: exclusionId(p), path: displayText(p, 260) }));
+
+  function argsFor(request, excl) {
+    if (request.kind === "startup") return {};
+    if (request.kind === "browsers") return { protectedPaths: excl };
+    return request.kind === "smart" ? (elevated ? { sid, elevated: true, protectedPaths: excl } : { sid, protectedPaths: excl })
+      : { target: request.target, protectedPaths: [...appProtected, ...excl] };
+  }
+
+  async function scan(request) {
+    const ac = new AbortController();
+    scanAbort = ac;
+    try {
+      const excl = exclusionsNow();
+      const result = await runScan(request.kind, argsFor(request, excl), { onProgress: progress, signal: ac.signal });
+      // Second layer, in main: whatever the worker returned, nothing at, inside or around an excluded folder is ever shown.
+      if (!goodResult(result) || excl.length === 0) return result;
+      const hit = exclusionMatcher(excl);
+      return { ...result, items: result.items.filter(it => !(it && typeof it.path === "string" && hit(it.path))) };
+    } finally { if (scanAbort === ac) scanAbort = null; }
+  }
+  const isAbort = e => !!e && (e.name === "AbortError" || e.code === "ABORT_ERR");
+  const goodResult = r => !!r && typeof r === "object" && Array.isArray(r.items);
+
+  // A new scan from the main window. Reports through phases and resolves.
+  async function newScan(request) {
+    last = null;
+    const gen = generation;
+    phase({ phase: "scanning" });
+    let result;
+    const scanStartMs = Date.now(); // trusted delete-time age limit: nothing changed after this moment is deleted
+    try {
+      result = await scan(request);
+      if (!goodResult(result)) throw new Error("bad result");
+    } catch (e) {
+      if (gen !== generation) return { ok: false, cancelled: true };
+      if (isAbort(e)) { phase({ phase: "idle" }); return { ok: false, cancelled: true }; }
+      phase({ phase: "error", detail: TEXT.scanFailed });
+      return { ok: false };
+    }
+    if (gen !== generation) return { ok: false, cancelled: true };
+    last = { request, result, diff: null, scanStartMs };
+    const rows = toView(result).rows.length;
+    if (rows > 0) { try { ui.showResults(); } catch { /* window could not open */ } }
+    phase({ phase: "results", detail: rows > 0 ? TEXT.review : TEXT.nothingFound });
+    return { ok: true, count: rows };
+  }
+
+  async function picked(pick) {
+    // R41: an elevated process never investigates (walks) the user's own, user-writable folders.
+    if (elevated) { phase({ phase: "error", detail: ADMIN_INVESTIGATE_MESSAGE }); return { ok: false }; }
+    take("pick");
+    let target = null;
+    try { target = await pick(); } catch { target = null; }
+    busy = null;
+    if (typeof target !== "string" || !target) { phase({ phase: "idle" }); return { ok: false, cancelled: true }; }
+    take("scan");
+    try { return await newScan({ kind: "investigate", target }); } finally { busy = null; }
+  }
+
+  // Re-checks the ids against the last scan. Returns the items to freeze, or throws "refused". Never touches the disk.
+  function choose(ids) {
+    if (!last || !last.request || !Array.isArray(ids) || ids.length < 1 || ids.length > MAX_IDS) throw refused();
+    let excluded;
+    try { excluded = exclusionMatcher(exclusionsNow(), { deep: true }); } catch { throw refused(); }
+    const items = last.result.items;
+    const byId = new Map();
+    for (const it of items) {
+      if (!it || typeof it.id !== "string" || !ID_RE.test(it.id) || byId.has(it.id)) throw refused(); // duplicates: refuse
+      byId.set(it.id, it);
+    }
+    const want = new Set();
+    for (const id of ids) { if (typeof id !== "string" || !ID_RE.test(id)) throw refused(); want.add(id); }
+    const ok = it => !!it && it.selectable === true && SELECTABLE_GROUPS.has(it.group) && CONFIDENCES.has(it.confidence) &&
+      (it.kind === "file" || it.kind === "dir") && typeof it.path === "string" && path.isAbsolute(it.path) &&
+      Array.isArray(it.sharedWith) && !violatesRoots(it.path, protectedRoots) && adminItemOk(it) && profileOk(it) && !excluded(it.path) && !neverTouch(it.path);
+    for (const id of want) {
+      const it = byId.get(id);
+      if (!ok(it)) throw refused();
+      if (it.companionOf !== undefined && !want.has(it.companionOf)) throw refused(); // a companion only travels with its parent
+    }
+    // Companions of ticked items are added here (a Recycle Bin $I record goes with its $R data).
+    for (const it of items) {
+      if (it && it.companionOf !== undefined && want.has(it.companionOf) && !want.has(it.id)) {
+        if (!ok(it)) throw refused();
+        want.add(it.id);
+      }
+    }
+    return [...want].map(id => byId.get(id));
+  }
+
+  async function restoreStep() {
+    phase({ phase: "restore" });
+    let r;
+    try { r = await restore({ runId: crypto.randomBytes(8).toString("hex"), elevated }); } catch { r = null; }
+    const outcome = r && Object.hasOwn(RESTORE_MESSAGES, r.outcome) ? r.outcome : "failed";
+    const message = outcome === "failed" && r && r.detail === "timeout" ? TIMEOUT_MESSAGE : RESTORE_MESSAGES[outcome];
+    phase({ phase: "restore", detail: message });
+    if (outcome === "made") return true;
+    let go = false;
+    try { go = (await ui.askContinueWithoutRestore(message + " Continue without a restore point?")) === true; } catch { go = false; }
+    return go;
+  }
+
+  async function ritual(run) {
+    const { server } = run;
+    let windowClosed = false;
+    let handle = null;
+    try {
+      phase({ phase: "ritual" });
+      handle = ui.openRitual(run.url);
+      if (handle && typeof handle.onClosed === "function") handle.onClosed(() => { windowClosed = true; });
+    } catch {
+      try { server.close(); } catch { /* closed */ }
+      phase({ phase: "error", detail: TEXT.ritualFailed });
+      return { ok: false };
+    }
+    const closeWindow = () => { try { if (handle && typeof handle.close === "function") handle.close(); } catch { /* gone */ } };
+    const ctx = { server, close: closeWindow, ended: false, keep: false };
+    ritualCtx = ctx;
+    try { return await ritualLoop(run, server, closeWindow, () => windowClosed, ctx); }
+    finally { ctx.ended = true; if (!ctx.keep && ritualCtx === ctx) ritualCtx = null; } // a finished run's page stays until ritualClose
+  }
+
+  async function ritualLoop(run, server, closeWindow, isWindowClosed, ctx) {
+    let state;
+    for (;;) {
+      try { state = server.getState(); } catch { state = "failed"; }
+      if (TERMINAL.has(state)) break;
+      if (isWindowClosed() && (state === "armed" || state === "unlocked")) {
+        try { server.close(); } catch { /* closed */ }
+        auditCancelled(run);
+        phase({ phase: "done", detail: TEXT.cancelled });
+        return { ok: false, cancelled: true };
+      }
+      await new Promise(r => setTimeout(r, pollMs));
+    }
+    // The run ended. Nothing to show for aborted/expired/failed: the page goes away and the main window shows the outcome.
+    // After "done" the page STAYS (press animation, blast, disk map with the real freed space) until the user clicks
+    // "Done - back to start" in the bar (ritualClose). The page has no bridge and the run's server is finished.
+    if (state === "done") ctx.keep = true; else closeWindow();
+    if (state === "expired" || state === "aborted") {
+      phase({ phase: "done", detail: state === "expired" ? TEXT.expired : TEXT.aborted });
+      return { ok: false };
+    }
+    let lines = [];
+    try { lines = readAudit(paths.runDir, run.runId); } catch { lines = []; }
+    const s = doneSummary(Array.isArray(lines) ? lines.filter(l => l && l.runId === run.runId) : []);
+    if (state === "failed") {
+      phase({ phase: "error", detail: TEXT.failed });
+      return { ok: false };
+    }
+    if (!s) { // the server finished, but its log line could not be read: say so, claim no numbers
+      phase({ phase: "done", detail: TEXT.doneNoAudit, keepView: ctx.keep });
+      return { ok: true };
+    }
+    phase({ phase: "done", detail: doneText(s), ...s, keepView: ctx.keep });
+    return { ok: true, ...s };
+  }
+
+  async function deleteFlow(chosen) {
+    let confirmed = false;
+    try { confirmed = (await ui.confirmPermanent()) === true; } catch { confirmed = false; }
+    if (!confirmed) return { ok: false, cancelled: true };
+    const result = last.result;
+    const scanStartMs = last.scanStartMs;
+    last = null; // from here on this scan is used up: a new delete needs a new scan
+    try { ui.closeResults(); } catch { /* already closed */ }
+
+    const settings = loadSettings(paths.settingsFile);
+    if (settings.restorePoint !== false) {
+      if (!(await restoreStep())) { phase({ phase: "done", detail: TEXT.stopped }); return { ok: false, stopped: true }; }
+    }
+
+    let sel;
+    try {
+      // Excluded folders again, from the file as it is NOW (the list can change while the user answers the questions above).
+      const excl = exclusionsNow();
+      const excludedNow = exclusionMatcher(excl, { deep: true });
+      if (chosen.some(i => excludedNow(i.path))) throw new Error("excluded");
+      const map = {
+        sessionId: "nuke-uninstaller",
+        items: result.items.map(i => ({ id: i.id, group: i.group, path: i.path, sharedWith: Array.isArray(i.sharedWith) ? i.sharedWith : [] })),
+        allowedRoots: Array.isArray(result.allowedRoots) ? result.allowedRoots : [],
+        protectedPaths: [...appProtected, ...excl, ...(Array.isArray(result.protectedPaths) ? result.protectedPaths : [])],
+        livePaths: [],
+      };
+      const ids = chosen.map(i => i.id);
+      sel = buildSelection(map, ids, { allowShared: chosen.filter(i => i.group === "shared").map(i => i.id) });
+      // R32 again on the frozen paths, then the engine's on-disk check (it must exist and pass checkPath now).
+      if (sel.paths.some(p => violatesRoots(p, protectedRoots))) throw new Error("protected root");
+      if (sel.paths.some(p => neverTouch(p))) throw new Error("never-touch");
+      revalidate(sel, { adminContents: elevated });
+      // Age and lock re-check just before the run starts (the server repeats the age check entry by entry at delete time).
+      if (!Number.isFinite(scanStartMs)) throw new Error("no scan time");
+      for (const it of chosen) {
+        const st = fs.lstatSync(it.path);
+        if (changedAfter(st, scanStartMs)) throw new Error("changed since the scan");
+        if (it.kind === "file" && isLocked(it.path)) throw new Error("locked");
+      }
+    } catch {
+      phase({ phase: "error", detail: TEXT.changed });
+      return { ok: false };
+    }
+
+    let run;
+    try { run = await startRun(sel, { runDir: paths.runDir, adminContents: elevated, scanStartMs, plainConfirm: settings.plainConfirm === true }); } catch {
+      phase({ phase: "error", detail: TEXT.startFailed });
+      return { ok: false };
+    }
+    currentRun = run;
+    return ritual(run);
+  }
+
+  // Closing the confirm window before the press is a decision worth keeping a record of (no token, no url).
+  function auditCancelled(run) {
+    try {
+      const rec = { at: new Date().toISOString(), sessionId: "nuke-uninstaller", ...(typeof run.sha256 === "string" ? { sha256: run.sha256 } : {}), runId: run.runId, state: "cancelled" };
+      fs.appendFileSync(path.join(paths.runDir, "nuke-audit.log"), JSON.stringify(rec) + "\n");
+    } catch { /* best effort */ }
+  }
+
+  return {
+    async settingsGet() { return { ...loadSettings(paths.settingsFile), exclusions: exclusionRows(readExclusions(paths.settingsFile).list) }; },
+    async settingsSet(s) { saveSettings(paths.settingsFile, s); return { ...loadSettings(paths.settingsFile), exclusions: exclusionRows(readExclusions(paths.settingsFile).list) }; },
+    // ---- Exclusions: the window holds only opaque ids; the picker runs in main; the list lives in settings.json. ----
+    // Both resolve { ok, rows: [{ id, path }], reason? } with reason one of: cancelled, invalid, duplicate, full, gone, failed.
+    async exclusionsAdd() {
+      take("pick");
+      let target = null;
+      try { try { target = await ui.pickFolder(); } catch { target = null; } } finally { busy = null; }
+      const cur = readExclusions(paths.settingsFile); // unreadable file: nothing to keep, a clean one is written below
+      if (typeof target !== "string" || !target) return { ok: false, reason: "cancelled", cancelled: true, rows: exclusionRows(cur.list) };
+      const r = addExclusion(cur.list, target);
+      if (!r.ok) return { ok: false, reason: r.reason, rows: exclusionRows(cur.list) };
+      try { saveExclusions(paths.settingsFile, r.list); } catch { return { ok: false, reason: "failed", rows: exclusionRows(cur.list) }; }
+      return { ok: true, rows: exclusionRows(r.list) };
+    },
+    async exclusionsRemove(arg) {
+      if (busy) throw busyError();
+      const id = arg && typeof arg.id === "string" && ID_RE.test(arg.id) ? arg.id : null;
+      if (id === null) throw refused();
+      const cur = readExclusions(paths.settingsFile);
+      if (!cur.ok) return { ok: false, reason: "failed", rows: [] };
+      const hit = cur.list.find(p => exclusionId(p) === id);
+      if (hit === undefined) return { ok: false, reason: "gone", rows: exclusionRows(cur.list) };
+      const next = cur.list.filter(p => p !== hit);
+      try { saveExclusions(paths.settingsFile, next); } catch { return { ok: false, reason: "failed", rows: exclusionRows(cur.list) }; }
+      return { ok: true, rows: exclusionRows(next) };
+    },
+    async statusGet() { return { elevated: identityKnown ? elevated : null, canRelaunchAdmin: relaunchOffered() }; },
+
+    async scanSmart() {
+      take("scan");
+      try { return await newScan({ kind: "smart" }); } finally { busy = null; }
+    },
+    // Browsers cleaner (round 2): browser cache folders (pre-ticked when old enough and not in use) and optional browsing-history
+    // files (never pre-ticked). The same findings, results screen and delete funnel as Smart Scan, plus the R45 profile rule.
+    async scanBrowsers() {
+      if (elevated) { phase({ phase: "error", detail: ADMIN_BROWSERS_MESSAGE }); return { ok: false }; } // R41: an elevated process never walks user folders
+      take("scan");
+      try { return await newScan({ kind: "browsers" }); } finally { busy = null; }
+    },
+    async scanStartup() {
+      take("scan");
+      try { return await newScan({ kind: "startup" }); } finally { busy = null; }
+    },
+    // ---- installed programs and Windows apps (round 1 of version 2). The renderer only ever sees opaque ids. ----
+    async programsList() {
+      if (busy) throw busyError();
+      if (typeof readPrograms !== "function") return { ok: false, rows: [] };
+      busy = "list";
+      try {
+        const r = await readPrograms();
+        if (!r || !Array.isArray(r.programs)) return { ok: false, rows: [] };
+        programById = new Map(r.programs.map(p => [p.id, p]));
+        return { ok: r.ok === true, rows: r.programs.map(programRow), notes: Array.isArray(r.notes) ? r.notes.map(String) : [] };
+      } finally { busy = null; }
+    },
+    async programsUninstall(arg) {
+      if (busy) throw busyError();
+      const p = arg && typeof arg.id === "string" ? programById.get(arg.id) : null;
+      const cmd = p && !p.lossy ? parseUninstallCommand(p.uninstallCommand) : null;
+      if (!p || !cmd) throw refused();
+      let yes = false;
+      try { yes = (await ui.confirmAction("Run the uninstaller of " + p.name + "? This will start: " + cmd.exe + (cmd.args ? " " + cmd.args : "") + " . When it finishes the app looks for leftover files; nothing is deleted without your confirmation.")) === true; } catch { yes = false; }
+      if (!yes) return { ok: false, cancelled: true };
+      take("scan");
+      try {
+        const target = leftoverTarget(p);
+        phase({ phase: "scanning" });
+        const r = await runProgramUninstaller({ exe: cmd.exe, args: cmd.args });
+        if (!r || r.ok !== true) { phase({ phase: "error", detail: TEXT.uninstallFailed }); return { ok: false }; }
+        programById = new Map();
+        if (!target) { phase({ phase: "done", detail: TEXT.uninstallDone }); return { ok: true, scanned: false }; }
+        busy = null; take("scan");
+        return await newScan({ kind: "investigate", target });
+      } finally { busy = null; }
+    },
+    async appsList() {
+      if (busy) throw busyError();
+      busy = "list";
+      try {
+        const r = await readApps();
+        if (!r || !Array.isArray(r.apps)) return { ok: false, rows: [] };
+        appById = new Map(r.apps.map(a => [crypto.createHash("sha1").update("app:" + a.fullName).digest("hex").slice(0, 16), a]));
+        return { ok: r.ok === true, rows: [...appById].map(([id, a]) => ({ id, name: a.name, version: a.version })) };
+      } finally { busy = null; }
+    },
+    async appsRemove(arg) {
+      if (busy) throw busyError();
+      const a = arg && typeof arg.id === "string" ? appById.get(arg.id) : null;
+      if (!a) throw refused();
+      let yes = false;
+      try { yes = (await ui.confirmAction("Remove the Windows app " + a.name + " for your account? You can install it again from the Microsoft Store.")) === true; } catch { yes = false; }
+      if (!yes) return { ok: false, cancelled: true };
+      take("scan");
+      try {
+        const r = await removeApp(a.fullName);
+        appById = new Map();
+        phase({ phase: "done", detail: r && r.ok === true ? TEXT.appRemoved : TEXT.appFailed });
+        return { ok: !!(r && r.ok === true) };
+      } finally { busy = null; }
+    },
+    // ---- Windows tools: a fixed list of built-in Windows programs. The renderer only ever holds the key. ----
+    async toolsList() { return toolList(); },
+    async toolsOpen(arg) {
+      // An elevated (or unknown) app would start the tool with administrator rights: refused. Standard mode only.
+      if (!identityKnown || elevated) throw refused();
+      const key = arg && typeof arg === "object" ? arg.tool : undefined;
+      if (!isToolKey(key)) throw refused();
+      let r = null;
+      try { r = await startTool(key); } catch { r = null; }
+      return { ok: !!r && r.ok === true };
+    },
+    async scanInvestigate() { return picked(() => ui.pickFile()); },
+    async scanFolder() { return picked(() => ui.pickFolder()); },
+
+    // From the results window: resolves the new view (with its diff) or rejects with a fixed message.
+    async scanAgain() {
+      if (busy) throw busyError();
+      if (!last) throw refused();
+      busy = "scan";
+      const prev = last;
+      const gen = generation;
+      const scanStartMs = Date.now();
+      try {
+        phase({ phase: "scanning" });
+        let next;
+        try {
+          next = await scan(prev.request);
+          if (!goodResult(next)) throw new Error("bad result");
+          if (gen !== generation) throw Object.assign(new Error("superseded"), { name: "AbortError" });
+        } catch (e) {
+          if (gen !== generation) throw Object.assign(new Error("The scan was cancelled"), { name: "AbortError" }); // closed meanwhile: stay silent
+          phase({ phase: "results", detail: TEXT.review });
+          throw isAbort(e) ? Object.assign(new Error("The scan was cancelled"), { name: "AbortError" }) : new Error(GENERIC_ERROR);
+        }
+        const diff = diffScans(prev.result, next);
+        last = { request: prev.request, result: next, diff, scanStartMs };
+        phase({ phase: "results", detail: TEXT.review });
+        return toView(next, diff);
+      } finally { busy = null; }
+    },
+
+    async scanCancel() {
+      if (scanAbort) scanAbort.abort();
+      return { ok: true };
+    },
+
+    async resultsGet() {
+      if (!last) throw refused();
+      return toView(last.result, last.diff);
+    },
+
+    async delete(arg) {
+      if (ritualCtx) throw busyError(); // a finished confirmation page is still up: close it first
+      if (!identityKnown) { phase({ phase: "error", detail: IDENTITY_UNKNOWN_MESSAGE }); throw new Refusal(IDENTITY_UNKNOWN_MESSAGE); }
+      if (busy) throw busyError();
+      const ids = arg && typeof arg === "object" ? arg.ids : undefined;
+      const chosen = choose(ids); // throws "refused" before anything is shown or started
+      busy = "delete";
+      try { return await deleteFlow(chosen); }
+      catch { phase({ phase: "error", detail: GENERIC_ERROR }); return { ok: false }; }
+      finally { busy = null; currentRun = null; }
+    },
+
+    // True only while a started run's server is in the "deleting" state (main uses it to decide whether an internal error may quit the app).
+    isDeleting() {
+      try { return !!currentRun && currentRun.server.getState() === "deleting"; } catch { return false; }
+    },
+
+    // "Cancel - nothing will be deleted" in the main window's bar: the same path as closing the old confirmation window
+    // before the press (the ritual loop sees the page go away: server closed, audit "cancelled"). Refused once the button
+    // was pressed (the server is past armed/unlocked) or when no confirmation is up.
+    async ritualCancel() {
+      const c = ritualCtx;
+      if (!c || c.ended) throw refused();
+      let state;
+      try { state = c.server.getState(); } catch { state = "failed"; }
+      if (state !== "armed" && state !== "unlocked") throw refused();
+      c.close();
+      return { ok: true };
+    },
+
+    // "Done - back to start": accepted ONLY after the run ended (done/aborted/expired/failed/cancelled). Detaches the finished
+    // page and returns to the start. It cannot start, continue or influence any run.
+    async ritualClose() {
+      const c = ritualCtx;
+      if (!c || c.ended !== true) throw refused();
+      ritualCtx = null;
+      last = null;
+      try { c.close(); } catch { /* gone */ }
+      phase({ phase: "idle" });
+      return { ok: true };
+    },
+
+    async resultsClose() {
+      if (busy === "delete") throw busyError();
+      generation++;
+      if (busy === "scan" && scanAbort) scanAbort.abort();
+      last = null;
+      try { ui.closeResults(); } catch { /* already closed */ }
+      phase({ phase: "idle" });
+      return { ok: true };
+    },
+
+    // Phase 1b: "Relaunch as administrator". On "started" main quits this instance (it released its single-instance
+    // lock first); "cancelled" (the user said no at the UAC prompt) leaves everything as it was.
+    async adminRelaunch() {
+      if (elevated || !identityKnown || !relaunchOffered()) throw refused(); // R46: only an installed copy under Program Files
+      if (typeof relaunch !== "function") throw new Error(GENERIC_ERROR);
+      take("relaunch");
+      try {
+        let out;
+        try { out = await relaunch(); } catch { out = "failed"; }
+        if (out === "started") return { ok: true };
+        if (out === "cancelled") return { ok: false, cancelled: true };
+        if (out === "timeout") throw new Refusal(RELAUNCH_TIMEOUT_MESSAGE);
+        throw new Error(GENERIC_ERROR);
+      } finally { busy = null; }
+    },
+  };
+}
+
+// IPC-facing wrapper: whatever a method throws, only "busy", "refused", an AbortError or the generic text leaves main.
+export function guardController(c) {
+  const out = {};
+  for (const [k, fn] of Object.entries(c)) {
+    out[k] = async (...a) => {
+      try { return await fn(...a); } catch (e) {
+        if (e && e.name === "AbortError") { const x = new Error("The scan was cancelled"); x.name = "AbortError"; throw x; }
+        throw safeError(e);
+      }
+    };
+  }
+  return Object.freeze(out);
+}

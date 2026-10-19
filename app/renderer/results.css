@@ -1,0 +1,38 @@
+:root { color-scheme: dark; }
+body { margin: 0; background: #16161c; color: #e8e8ee; font: 14px/1.4 system-ui, sans-serif; }
+main { padding: 16px; max-width: 960px; margin: 0 auto; }
+h1 { font-size: 20px; margin: 0 0 8px; }
+h2 { font-size: 15px; margin: 16px 0 6px; }
+.notice { background: #4a1a1a; border: 1px solid #d8362b; padding: 8px 10px; border-radius: 6px; font-weight: 600; }
+.notes, #report-list { margin: 6px 0; padding-left: 20px; }
+.diff { min-height: 1.4em; margin: 6px 0; color: #ffd27a; }
+.found { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.found caption { position: absolute; left: -9999px; }
+.found th, .found td { text-align: left; padding: 4px 6px; border-bottom: 1px solid #2c2c36; overflow-wrap: anywhere; vertical-align: top; }
+.found th:nth-child(1) { width: 56px; }
+.found th:nth-child(3) { width: 80px; }
+.found th:nth-child(4), .found th:nth-child(5), .found th:nth-child(6) { width: 96px; }
+.path { display: block; color: #9a9aa8; font-size: 12px; }
+.badge { display: inline-block; padding: 0 6px; border-radius: 8px; font-size: 12px; background: #3a3a46; }
+.badge.high { background: #1f5a2e; }
+.badge.medium { background: #6a5a1a; }
+.badge.low { background: #6a2a1a; }
+.badge.new, .badge.resized { background: #1a4a6a; }
+tr[hidden] { display: none; }
+.error { color: #ff8a80; font-weight: 600; }
+.error[hidden], .admin[hidden], .report[hidden] { display: none; }
+.summary { margin: 12px 0 6px; font-weight: 600; }
+.buttons { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.action { display: grid; grid-template-columns: minmax(150px, 200px) 1fr; gap: 16px; align-items: center; }
+.desc { margin: 0; color: #a0a0b0; font-size: 13px; line-height: 1.4; }
+@media (max-width: 560px) { .action { grid-template-columns: 1fr; gap: 6px; } }
+button { font: inherit; padding: 8px 16px; border-radius: 6px; border: 1px solid #55556a; background: #2c2c3a; color: inherit; cursor: pointer; }
+button.danger { background: #b02a22; border-color: #d8362b; font-weight: 700; }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+.note { display: block; color: #c9b27a; font-size: 12px; }
+.report summary { cursor: pointer; color: #a0a0b0; font-weight: 600; margin: 8px 0; }
+.report details[open] summary { color: #ececf2; }
+
+.report li.grp { list-style: none; margin: 12px 0 4px -18px; font-weight: 600; color: #ececf2; }
+
+[hidden] { display: none !important; }

@@ -1,0 +1,35 @@
+/* Detective progress bar. Self-contained: no external references of any kind. */
+.det { --det-ink: #1b1b22; --det-skin: #f2c9a0; --det-hat: #5a4632; --det-fill: #d8362b; --det-track: #3a3a46; font: 14px/1.4 system-ui, sans-serif; }
+.det-bar { position: relative; padding-top: 52px; }
+.det-track { position: relative; height: 14px; border-radius: 7px; background: var(--det-track); }
+.det-fill { height: 100%; width: 0; border-radius: 7px; background: var(--det-fill); transition: width 0.25s linear; }
+.det-walker { position: absolute; bottom: 4px; left: 0; width: 40px; height: 52px; margin-left: -20px; transition: left 0.25s linear; pointer-events: none; }
+.det-svg { display: block; overflow: visible; }
+.det-body { fill: #6b6b7a; }
+.det-head { fill: var(--det-skin); stroke: var(--det-ink); stroke-width: 1; }
+.det-hat { fill: var(--det-hat); stroke: var(--det-ink); stroke-width: 1; }
+.det-brim { fill: var(--det-hat); stroke: var(--det-ink); stroke-width: 1; }
+.det-band { fill: var(--det-ink); }
+.det-eye-white { fill: #fff; stroke: var(--det-ink); stroke-width: 0.6; }
+.det-pupil { fill: var(--det-ink); }
+.det-handle { stroke: var(--det-ink); stroke-width: 2.4; stroke-linecap: round; }
+.det-lens { fill: rgba(190, 230, 255, 0.45); stroke: var(--det-ink); stroke-width: 1.6; }
+.det-text { margin-top: 6px; min-height: 1.4em; overflow-wrap: anywhere; }
+
+.det-eyes { animation: det-eyes 2.4s ease-in-out infinite; }
+.det-glass { transform-origin: 30px 40px; animation: det-glass 1.2s ease-in-out infinite; }
+.det-indeterminate .det-fill { width: 30%; opacity: 0.5; animation: det-slide 1.8s ease-in-out infinite alternate; transition: none; }
+.det-indeterminate .det-walker { animation: det-walk 1.8s ease-in-out infinite alternate; transition: none; }
+
+@keyframes det-eyes { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-1.4px); } 75% { transform: translateX(1.4px); } }
+@keyframes det-glass { 0%, 100% { transform: translateY(0) rotate(-4deg); } 50% { transform: translateY(-2px) rotate(4deg); } }
+@keyframes det-slide { from { margin-left: 0; } to { margin-left: 70%; } }
+@keyframes det-walk { from { left: 15%; } to { left: 85%; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .det-eyes, .det-glass, .det-indeterminate .det-fill, .det-indeterminate .det-walker { animation: none; }
+  .det-eyes { transform: translateX(var(--det-eye-x, 0px)); }
+  .det-fill, .det-walker, .det-indeterminate .det-fill, .det-indeterminate .det-walker { transition: none; }
+  .det-indeterminate .det-fill { width: 100%; opacity: 0.35; margin-left: 0; }
+  .det-indeterminate .det-walker { left: 50%; }
+}

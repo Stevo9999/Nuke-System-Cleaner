@@ -1,0 +1,7 @@
+fixture/sandbox/
+out/
+dist/
+node_modules/
+.superpowers/
+.claude/
+release/
