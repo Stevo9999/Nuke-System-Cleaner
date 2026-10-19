@@ -28,7 +28,7 @@ What one early reviewer said about it:
 |---|---|
 | **Scan** | Smart Scan: looks only in a fixed list of safe places (temp files, caches, crash dumps, thumbnails, your Recycle Bin) and shows what could be freed. |
 | **Manually find a file to investigate** | Pick a file, shortcut or program. The app follows it to the program it belongs to and lists the leftover files, folders and shortcuts that program made. |
-| **Pick a folder to investigate** | Looks into a folder and checks whether other programs, sub-folders or shortcuts use its contents. |
+| **Pick a folder to investigate** | Pick a folder. If it belongs to an installed program, the app asks whether to run that program's own uninstaller first (you can say no and only look for leftovers), then lists the leftovers, and checks again after you delete them. If Windows must restart to finish, it tells you; it never restarts by itself. |
 | **Installed programs** | A searchable list of installed programs. Pick one: the app shows you the exact command, asks you first, runs the program's own uninstaller, then looks for leftovers. |
 | **Windows apps** | Lists Microsoft Store apps for your account and removes the one you pick (for your account only). |
 | **Windows tools** | One-click shortcuts to built-in Windows tools such as Task Scheduler, Services and System Restore. Nothing is changed by this app. |

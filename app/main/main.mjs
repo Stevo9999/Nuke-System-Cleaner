@@ -130,6 +130,13 @@ function start() {
     confirmAction(message) {
       return questions.ask("action", String(message));
     },
+    // Guided folder flow: "run the uninstaller first?" (No = only look for leftovers) and "keep cleaning before the restart?".
+    askUninstallFirst(message) {
+      return questions.ask("folderapp", String(message));
+    },
+    askRestartContinue(message) {
+      return questions.ask("restart", String(message));
+    },
     askContinueWithoutRestore(message) {
       return questions.ask("restore", String(message));
     },
@@ -179,7 +186,7 @@ function start() {
       appDir: app.getAppPath(), dataRoot: paths.root, home: os.homedir(), env: process.env, readReg: regQuery,
       execDir: app.isPackaged ? path.dirname(process.execPath) : null,
     });
-    controller = createController({ ui, paths, identity, runScan, protectedPaths: prot.protectedPaths, protectedRoots: prot.protectedRoots, profileRoot: prot.profileRoot, relaunch: relaunchElevated, readPrograms: () => listPrograms(regQuery) });
+    controller = createController({ ui, paths, identity, runScan, protectedPaths: prot.protectedPaths, protectedRoots: prot.protectedRoots, profileRoot: prot.profileRoot, relaunch: relaunchElevated, readPrograms: () => listPrograms(regQuery), readPendingRenames: () => regQuery("pendingRenames") });
     mainWindow = new BrowserWindow(windowOptions("main", { preload: PRELOAD, devTools: !app.isPackaged }));
     const id = mainWindow.webContents.id;
     // The question answer is handled here (main-window sender only, ignored unless a question is pending).

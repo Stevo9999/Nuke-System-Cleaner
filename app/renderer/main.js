@@ -12,7 +12,7 @@ function isAbort(e) { return !!e && (e.name === "AbortError" || /\bAbortError\b/
 export const DESCRIPTIONS = Object.freeze({
   scan: "Smart Scan. Looks only in a fixed list of safe places (temp files, caches, crash dumps, thumbnails, your Recycle Bin) and lists what could be freed. Nothing is deleted yet.",
   investigateFile: "Pick a file, shortcut or program. The app follows it to the program it belongs to and lists the leftover files, folders and shortcuts that program made.",
-  investigateFolder: "Looks into a folder and checks whether other programs, sub-folders or shortcuts use its contents, so you can see what is safe to remove together.",
+  investigateFolder: "Pick a folder. If it belongs to an installed program, the app asks whether to run that program's own uninstaller first (you can say no), then lists the leftovers, and checks again after you delete them. If Windows must restart to finish, you are told. Nothing is deleted without your confirmation.",
   programs: "Pick an installed program and run its own uninstaller. Afterwards the app looks for the files it left behind and lets you delete them.",
   apps: "Lists the Windows (Microsoft Store) apps on this PC and removes the one you pick, for your account only.",
   startup: "Lists the programs that start by themselves when Windows starts (the apps that slow down your boot). View only: nothing is changed.",
@@ -26,6 +26,7 @@ export const DESCRIPTIONS = Object.freeze({
   plainConfirm: "Off by default. When on, the final confirmation is a simple screen with an Unlock button and then a Delete permanently button. It is just as careful: the same steps and waiting time apply.",
   relaunch: "Restart with administrator rights to also clear a few Windows system folders. Only offered from a copy installed in C:\\Program Files.",
   cancelScan: "Stop the scan and go back.",
+  stopWaitingUninstall: "Stop waiting for the uninstaller. It is not forced to close and may keep running on its own; this app then does not look for leftovers and deletes nothing.",
   stopWaiting: "Stop waiting for Windows to make the restore point. You are then asked whether to continue without one; nothing is deleted unless you say yes.",
   back: "Return to the start screen.",
 });
@@ -71,6 +72,16 @@ export function createApp(doc, nuke, mount = mountDetective) {
   };
   const showMsg = (el, text) => { el.textContent = text; el.hidden = false; };
 
+  // Restart notice: set by the main process (fixed wording, app name sanitised there); stays for the whole session.
+  const noticeEls = [];
+  const noticeEl = () => { const p = make("p", "notice", ""); p.setAttribute("role", "status"); p.hidden = true; noticeEls.push(p); return p; };
+  let restartNotice = "";
+  const showNotice = text => {
+    restartNotice = phaseText("done", text);
+    for (const p of noticeEls) { p.textContent = restartNotice; p.hidden = false; }
+    ritualNotice.textContent = restartNotice; ritualNotice.setAttribute("title", restartNotice); ritualNotice.hidden = false;
+  };
+
   let current = "home";
   let busy = false;
   const scanButtons = [];
@@ -79,6 +90,7 @@ export function createApp(doc, nuke, mount = mountDetective) {
   const home = make("section", "screen");
   home.appendChild(make("h1", "title", "Nuke-Uninstaller"));
   home.appendChild(make("p", "lead", "Find leftovers and clear them out safely."));
+  home.appendChild(noticeEl());
   const homeError = alertLine();
   const setBusy = v => { busy = v; for (const b of scanButtons) b.disabled = v; };
   const run = fn => async () => {
@@ -184,6 +196,16 @@ export function createApp(doc, nuke, mount = mountDetective) {
   stopWaitRow.hidden = true;
   phaseScreen.appendChild(stopWaitRow);
   phaseScreen.appendChild(stopWaitError);
+  // "Stop waiting" for a running uninstaller (same channel; the uninstaller itself is never killed).
+  const stopUninstall = button("Stop waiting for the uninstaller", async () => {
+    stopWaitError.hidden = true;
+    stopUninstall.disabled = true;
+    try { await nuke.cancelScan(); } catch (e) { if (!isAbort(e)) showMsg(stopWaitError, friendly(e)); stopUninstall.disabled = false; }
+  });
+  const stopUninstallRow = act(stopUninstall, DESCRIPTIONS.stopWaitingUninstall);
+  stopUninstallRow.hidden = true;
+  phaseScreen.appendChild(stopUninstallRow);
+  phaseScreen.appendChild(noticeEl());
   const phaseBack = button("Back", () => show("home"));
   const phaseBackRow = act(phaseBack, DESCRIPTIONS.back);
   phaseScreen.appendChild(phaseBackRow);
@@ -192,7 +214,12 @@ export function createApp(doc, nuke, mount = mountDetective) {
   const ritualScreen = make("section", "screen ritual-bar");
   const ritualText = make("p", "ritual-text", phaseText("ritual"));
   ritualText.setAttribute("role", "status");
-  ritualScreen.appendChild(ritualText);
+  const ritualLines = make("div", "ritual-lines");
+  ritualLines.appendChild(ritualText);
+  const ritualNotice = make("p", "ritual-notice", "");
+  ritualNotice.hidden = true;
+  ritualLines.appendChild(ritualNotice);
+  ritualScreen.appendChild(ritualLines);
   const ritualError = alertLine();
   const ritualCancel = button("Cancel - nothing will be deleted", async () => {
     ritualError.hidden = true;
@@ -235,12 +262,14 @@ export function createApp(doc, nuke, mount = mountDetective) {
   questionScreen.appendChild(questionNo);
   questionScreen.appendChild(questionError);
   function onQuestion(q) {
-    if (!q || typeof q !== "object" || (q.kind !== "permanent" && q.kind !== "restore" && q.kind !== "action") || typeof q.message !== "string") return;
+    if (!q || typeof q !== "object" || !["permanent", "restore", "action", "folderapp", "restart"].includes(q.kind) || typeof q.message !== "string") return;
     if (current !== "question") questionBefore = current;
     questionOpen = true;
     questionText.textContent = phaseText("done", q.message);
-    questionYes.textContent = q.kind === "restore" ? "Continue without a restore point" : q.kind === "action" ? "Yes, go ahead" : "Continue";
-    questionNo.textContent = q.kind === "restore" ? "Stop" : "Cancel";
+    const labels = { restore: ["Continue without a restore point", "Stop"], action: ["Yes, go ahead", "Cancel"],
+      folderapp: ["Yes, run the uninstaller first", "No, only look for leftovers"], restart: ["Yes, keep cleaning leftovers", "No, stop here"] }[q.kind] || ["Continue", "Cancel"];
+    questionYes.textContent = labels[0];
+    questionNo.textContent = labels[1];
     questionYes.disabled = false; questionNo.disabled = false;
     questionError.hidden = true;
     show("question");
@@ -605,17 +634,21 @@ export function createApp(doc, nuke, mount = mountDetective) {
     const phase = p && typeof p === "object" ? p.phase : p;
     const detail = p && typeof p === "object" ? p.detail : undefined;
     homeError.hidden = true;
+    if (p && typeof p === "object" && typeof p.notice === "string" && p.notice) showNotice(p.notice);
     if (phase === "scanning") { show("scanning"); return; }
     pendingProgress = null;
     if (phase === "idle") { show("home"); return; }
     if (phase === "ritual") { ritualMode("confirm", phaseText("ritual")); return; }
     // A finished run keeps its page (blast, disk map); the bar shows the outcome and the way back.
     if (phase === "done" && p && typeof p === "object" && p.keepView === true) { ritualMode("done", phaseText("done", detail)); return; }
+    if (phase !== "uninstalling") stopUninstallRow.hidden = true;
     phaseLine.textContent = phaseText(phase, detail);
     // "deleting" keeps the confirmation page below the bar; only the live count changes (no Cancel once it started).
     if (phase === "deleting") { ritualMode("busy", phaseText("deleting", detail)); return; }
-    phaseBack.hidden = phase === "restore" || phase === "checking";
-    phaseBackRow.hidden = phase === "restore" || phase === "checking";
+    phaseBack.hidden = phase === "restore" || phase === "checking" || phase === "uninstalling";
+    phaseBackRow.hidden = phase === "restore" || phase === "checking" || phase === "uninstalling";
+    stopUninstallRow.hidden = phase !== "uninstalling";
+    stopUninstall.disabled = false;
     const waiting = phase === "restore" && (!detail || detail === "");
     stopWaitRow.hidden = !waiting;
     stopWaitError.hidden = true;

@@ -28,8 +28,31 @@ reviewed and honest about its limits.
 * **Manually find a file to investigate.** You pick a file, shortcut, program or folder. The app traces what belongs to it
   (a shortcut's target, the program's entry and install folder, matching leftover folders and Start Menu shortcuts) and
   shows what it found.
-* **Pick a folder to investigate.** You pick a folder. The app investigates it the same way (what belongs to it, who else
-  uses it) and offers that folder for removal. It is **not** a scan for junk inside the folder.
+* **Pick a folder to investigate.** You pick a folder (standard mode only). The app investigates it the same way (what belongs
+  to it, who else uses it) and offers that folder for removal; it is **not** a scan for junk inside the folder. In addition it
+  checks, read-only, whether the folder belongs to **one** installed program, and the flow is:
+  1. **Detect.** A program is "the app of this folder" only when its Uninstall entry's `InstallLocation` equals the folder, or the
+     folder equals or contains the folder of its `DisplayIcon` file or of its uninstaller program, by exact canonical path
+     comparison (`C:\Foo` is not `C:\FooBar`; a child of the install folder is not a match; nothing under `C:\Windows`
+     counts; never by name). An entry whose command cannot be parsed exactly, or whose text is lossy, is reported and not run.
+     If several different programs match, no uninstaller is offered. In all these cases (and when the program list could not
+     be read completely) only the leftover scan below runs, as before.
+  2. **Ask first.** An in-window question: "This folder belongs to <App>. Run its own uninstaller first? It will run: <exact
+     command>". **No, only look for leftovers** runs nothing and goes straight to the leftover scan. **Yes** runs that one command
+     through the same path as Installed programs (phase text "Running the uninstaller of <App>...", with a Stop waiting button that
+     only stops the waiting; the uninstaller is never killed).
+  3. **Restart check**, right after the uninstaller exits: a restart is needed when its exit code is 3010 or 1641 (1641 means
+     Windows may restart by itself, and the prompt says so), or when the read-only `PendingFileRenameOperations` value under
+     `HKLM\SYSTEM\CurrentControlSet\Control\Session Manager` mentions a path inside the picked folder or the app's install folder.
+     If so, the app asks "...Windows must restart to finish removing <App>. You can keep cleaning leftovers now and restart later.
+     Continue?" (No stops here). This app never restarts Windows.
+  4. **Sweep.** Only now the normal leftover scan runs, on the picked folder and on the app's install folder (merged), and the
+     normal results screen opens (only high-confidence items pre-ticked). Nothing is deleted until you press Delete them! and
+     finish the usual warning, restore point and key (or simple confirm) steps.
+  5. **Re-check.** After that delete run the same folder(s) are scanned again and the final text says either "Re-check: nothing
+     left" or "Re-check: N items could not be removed (in use or waiting for a restart)" with up to 5 names. If a restart is
+     needed or items are still there, the notice "Restart Windows when you are ready to finish removing <App>." stays on the
+     screens until you close the app. It is a notice only.
 * **Your user folder only (R45).** For a file or folder you pick, only items inside your own Windows user folder
   (`%USERPROFILE%`, and never that folder itself) can be ticked for deletion; anything outside it is shown only (to be
   deleted by hand). If the app cannot determine a valid user folder, nothing from a picked file or folder can be deleted.
@@ -160,7 +183,7 @@ program can change those). The test `test/inventory.test.mjs` pins this list exa
 | `rundll32.exe` | `run.mjs` (the `/nuke` command line only, not the Electron app) | `url.dll,FileProtocolHandler <the one-time http://127.0.0.1:<port>/?t=<64 hex> URL>` | hand the local page to your default browser |
 | `powershell.exe` (`C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`) | `lib/winapps.mjs` | `-NoProfile -NonInteractive -EncodedCommand <base64>` (fixed list script, or `Remove-AppxPackage -Package '<full name>'` for the one app you confirmed; current user only) | list and remove Windows (Store) apps |
 | the selected program's own uninstaller | `lib/uninstall-run.mjs` | exactly the command stored in that program's own uninstall entry, shown to you and confirmed first (`MsiExec` entries become `C:\Windows\System32\msiexec.exe /X{GUID}`); `shell: false` | run the uninstaller of the program you picked |
-| `reg.exe` | `lib/sysread.mjs` | `query <key>` for eleven fixed keys: Uninstall (HKLM, HKLM Wow6432Node, HKCU) with `/s`; Run and RunOnce (HKCU, HKLM, Wow6432Node Run) with no extra flag; `HKLM\SYSTEM\CurrentControlSet\Services` with `/s /v ImagePath`; `HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders` with no extra flag; `HKCU\SOFTWARE\Microsoft\OneDrive\Accounts` with `/s /v UserFolder` | read-only: installed programs, startup entries, services, and redirected Documents/Desktop/OneDrive folders (to protect them) |
+| `reg.exe` | `lib/sysread.mjs` | `query <key>` for twelve fixed keys: `HKLM\SYSTEM\CurrentControlSet\Control\Session Manager` with `/v PendingFileRenameOperations` (restart check after an uninstaller; read only); Uninstall (HKLM, HKLM Wow6432Node, HKCU) with `/s`; Run and RunOnce (HKCU, HKLM, Wow6432Node Run) with no extra flag; `HKLM\SYSTEM\CurrentControlSet\Services` with `/s /v ImagePath`; `HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders` with no extra flag; `HKCU\SOFTWARE\Microsoft\OneDrive\Accounts` with `/s /v UserFolder` | read-only: installed programs, startup entries, services, and redirected Documents/Desktop/OneDrive folders (to protect them) |
 | `schtasks.exe` | `lib/sysread.mjs` | `/query /fo csv /v /nh` | read-only: list scheduled tasks |
 | `whoami.exe` | `lib/sysread.mjs` | `/user /fo csv /nh` and `/groups /fo csv /nh` | read-only: your account id and whether you are an administrator |
 | `WindowsPowerShell\v1.0\powershell.exe` | `lib/restore.mjs` | `-NoProfile -NonInteractive -EncodedCommand <base64>` | create and verify one restore point. When not elevated, this script runs `Start-Process -Verb RunAs` and so starts a **second, elevated** `powershell.exe -NoProfile -NonInteractive -EncodedCommand <base64>` (its own script, which calls `Checkpoint-Computer` and `Get-ComputerRestorePoint`); when already elevated the inner script runs directly. The script texts are pinned by `test/inventory-scripts.test.mjs` |
