@@ -8,6 +8,14 @@ It runs as a normal user, needs no account and no internet connection, and sends
 
 > **Read the [disclaimer](#disclaimer) before you delete anything.** Deleting is permanent: files do not go to the Recycle Bin.
 
+## About this application
+
+This application is a basic file cleaner, but thrown together by AI with visual stimulation.
+
+It was written with the help of an AI coding assistant (Claude) and checked by an automated test suite and hand-testing on a real Windows 11 PC. It is a hobby project: treat it like any free tool from the internet and read the [disclaimer](#disclaimer) first.
+
+If you had to sum it up in one line: *a system cleaner, but with jingling keys.*
+
 ## What it can do
 
 | Button | What it does |
