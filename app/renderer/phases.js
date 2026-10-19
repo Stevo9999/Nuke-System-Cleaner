@@ -1,5 +1,5 @@
 // Pure phase -> text mapping for the main window. `detail` is already sanitised by the main process.
-export const PHASES = ["idle", "scanning", "results", "warning", "restore", "checking", "ritual", "deleting", "done", "error"];
+export const PHASES = ["idle", "scanning", "results", "warning", "restore", "uninstalling", "checking", "ritual", "deleting", "done", "error"];
 
 function clean(detail) {
   return typeof detail === "string" ? detail.replace(/[\u0000-\u001f\u007f​-‏‪-‮⁦-⁩﻿]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g, " ").trim().slice(0, 600) : "";
@@ -13,6 +13,7 @@ export function phaseText(phase, detail) {
     case "results": return clean(detail) || "Scan finished.";
     case "warning": return "Review the warning before anything is deleted";
     case "restore": return clean(detail) || "Windows is creating a system restore point";
+    case "uninstalling": return clean(detail) || "Running the uninstaller…";
     // checking / deleting: the main process sends a live count ("Checking... 150 of 3585", "Deleting... 900 of 3585").
     case "checking": return clean(detail) || "Checking the selected items…";
     case "deleting": return clean(detail) || "Deleting…";

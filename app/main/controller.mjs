@@ -29,6 +29,7 @@ import { changedAfter } from "../../lib/age.mjs";
 import { listPrograms, parseUninstallCommand, leftoverTarget, programRow } from "../../lib/programs.mjs";
 import { neverTouchPath } from "../../lib/never-touch.mjs";
 import { runUninstaller } from "../../lib/uninstall-run.mjs";
+import { detectAppForFolder, rebootAssessment, mergeInvestigations, EXIT_REBOOT_INITIATED } from "../../lib/app-folder.mjs";
 import { listWindowsApps, removeWindowsApp } from "../../lib/winapps.mjs";
 import { toolList, openTool, isToolKey } from "../../lib/wintools.mjs";
 
@@ -62,6 +63,9 @@ const TEXT = Object.freeze({
   listFailed: "The list could not be read.",
   uninstallFailed: "The uninstaller could not be run. Nothing was changed.",
   uninstallDone: "The uninstaller finished. No install folder was known, so no leftover scan was run.",
+  uninstallStopped: "Stopped waiting. The uninstaller may still be running on its own; this app did not look for leftovers and deleted nothing.",
+  stoppedAfterUninstall: "Stopped after the uninstaller. No leftover scan was run and nothing was deleted.",
+  gone: "The uninstaller finished and the folder is gone. Re-check: nothing left.",
   appRemoved: "The app was removed for your account.",
   appFailed: "The app could not be removed. Nothing was changed.",
   doneNoAudit: "Finished. The details could not be read from the log, so the number of items and the freed space are not shown.",
@@ -124,6 +128,7 @@ export function createController({
   runProgramUninstaller = runUninstaller,
   readApps = listWindowsApps,
   removeApp = removeWindowsApp,
+  readPendingRenames = null, // () => regQuery("pendingRenames"): read-only restart check; null => only the exit code counts
   startTool = openTool, // (key) => Promise<{ ok }>: launches one built-in Windows tool from the fixed list in lib/wintools.mjs
 } = {}) {
   // Ruling R44: only a real boolean counts. Anything else (null from readIdentity, missing, odd) is "unknown": scans still
@@ -174,23 +179,33 @@ export function createController({
   // out of every scan. When YOU pick one file or folder by hand INSIDE one of them, that folder no longer blocks the pick: only the
   // protected folders that strictly contain the picked item are dropped for that investigation. The folder itself, and any other
   // protected folder, stay protected; your own never-touch folders (Settings) are never dropped.
+  // A guided folder run may also carry `also` (the app's install folder); the same rule applies to each of the two targets.
+  const targetsOf = request => [request.target, request.also].filter(t => typeof t === "string" && path.isAbsolute(t));
   const protectedFor = request => {
     if (!request || request.kind !== "investigate" || typeof request.target !== "string" || !path.isAbsolute(request.target)) return appProtected;
-    const t = nk(request.target);
-    return appProtected.filter(q => { try { const n = nk(q); return !(t !== n && within(request.target, q)); } catch { return true; } });
+    const targets = targetsOf(request);
+    return appProtected.filter(q => targets.every(tg => { try { const n = nk(q); return !(nk(tg) !== n && within(tg, q)); } catch { return true; } }));
   };
 
   let programById = new Map(); // id -> program entry (kept here; a renderer only ever holds the id)
   let appById = new Map();
   let busy = null;          // null | "scan" | "pick" | "delete"
   let scanAbort = null;     // AbortController of the running scan
-  let restoreAbort = null;  // AbortController of the running restore point step ("Stop waiting")
+  let uninstallAbort = null; // AbortController of the "Stop waiting" for a running uninstaller (it is never killed)
+  let restoreAbort = null; // AbortController of the running restore point step ("Stop waiting")
   let last = null;          // { request, result, diff, scanStartMs }
   let ritualCtx = null;     // { server, close } while the embedded confirmation page is up (for ritualCancel)
   let currentRun = null;    // the started run while a delete is in progress (for isDeleting)
   let generation = 0;       // bumped by results:close; a scan that finishes under an older generation is dropped
 
-  const phase = p => { try { ui.sendPhase(p); } catch { /* window gone */ } };
+  // Apps whose removal still needs a Windows restart. Notice only: this app never restarts Windows.
+  const restartApps = [];
+  const noteRestart = name => { const n = displayText(name, 60) || "the program"; if (!restartApps.includes(n)) restartApps.push(n); };
+  const restartNotice = () => restartApps.length ? "Restart Windows when you are ready to finish removing " + restartApps.slice(0, 5).join(", ") + (restartApps.length > 5 ? " and others" : "") + "." : null;
+  const phase = p => {
+    const notice = restartNotice();
+    try { ui.sendPhase(notice ? { ...p, notice } : p); } catch { /* window gone */ }
+  };
   const progress = p => {
     try {
       const fraction = p && typeof p.fraction === "number" && Number.isFinite(p.fraction) ? Math.min(1, Math.max(0, p.fraction)) : null;
@@ -209,11 +224,11 @@ export function createController({
   }
   const exclusionRows = list => list.map(p => ({ id: exclusionId(p), path: displayText(p, 260) }));
 
-  function argsFor(request, excl) {
+  function argsFor(request, excl, target = request.target) {
     if (request.kind === "startup") return {};
     if (request.kind === "browsers") return { protectedPaths: excl };
     return request.kind === "smart" ? (elevated ? { sid, elevated: true, protectedPaths: excl } : { sid, protectedPaths: excl })
-      : { target: request.target, protectedPaths: [...protectedFor(request), ...excl] };
+      : { target, protectedPaths: [...protectedFor({ kind: "investigate", target }), ...excl] };
   }
 
   async function scan(request) {
@@ -221,7 +236,13 @@ export function createController({
     scanAbort = ac;
     try {
       const excl = exclusionsNow();
-      const result = await runScan(request.kind, argsFor(request, excl), { onProgress: progress, signal: ac.signal });
+      let result = await runScan(request.kind, argsFor(request, excl), { onProgress: progress, signal: ac.signal });
+      // A guided folder run also looks at the app's install folder: a second ordinary investigate scan, merged by finding id.
+      if (request.kind === "investigate" && typeof request.also === "string" && goodResult(result)) {
+        const second = await runScan("investigate", argsFor(request, excl, request.also), { onProgress: progress, signal: ac.signal });
+        if (!goodResult(second)) throw new Error("bad result");
+        result = mergeInvestigations(result, second);
+      }
       // Second layer, in main: whatever the worker returned, nothing at, inside or around an excluded folder is ever shown.
       if (!goodResult(result) || excl.length === 0) return result;
       const hit = exclusionMatcher(excl);
@@ -232,7 +253,7 @@ export function createController({
   const goodResult = r => !!r && typeof r === "object" && Array.isArray(r.items);
 
   // A new scan from the main window. Reports through phases and resolves.
-  async function newScan(request) {
+  async function newScan(request, { lead = "" } = {}) {
     last = null;
     const gen = generation;
     phase({ phase: "scanning" });
@@ -251,11 +272,11 @@ export function createController({
     last = { request, result, diff: null, scanStartMs };
     const rows = toView(result).rows.length;
     if (rows > 0) { try { ui.showResults(); } catch { /* window could not open */ } }
-    phase({ phase: "results", detail: rows > 0 ? TEXT.review : TEXT.nothingFound });
+    phase({ phase: "results", detail: (lead ? lead + " " : "") + (rows > 0 ? TEXT.review : TEXT.nothingFound) });
     return { ok: true, count: rows };
   }
 
-  async function picked(pick) {
+  async function picked(pick, { guided = false } = {}) {
     // R41: an elevated process never investigates (walks) the user's own, user-writable folders.
     if (elevated) { phase({ phase: "error", detail: ADMIN_INVESTIGATE_MESSAGE }); return { ok: false }; }
     take("pick");
@@ -264,7 +285,67 @@ export function createController({
     busy = null;
     if (typeof target !== "string" || !target) { phase({ phase: "idle" }); return { ok: false, cancelled: true }; }
     take("scan");
-    try { return await newScan({ kind: "investigate", target }); } finally { busy = null; }
+    try { return guided ? await guidedFolder(target) : await newScan({ kind: "investigate", target }); } finally { busy = null; }
+  }
+
+  const isDir = p => { try { const st = fs.lstatSync(p); return st.isDirectory() && !st.isSymbolicLink(); } catch { return false; } };
+  const cmdText = c => c.exe + (c.args ? " " + c.args : "");
+
+  // The guided "pick a folder" flow (standard mode only). Order, fixed: detect (read-only) -> ASK -> uninstaller -> restart check ->
+  // (ASK) -> leftover scan -> results screen. Nothing here deletes anything: deleting stays behind the results screen's Delete
+  // button and the warning / restore point / key steps of deleteFlow.
+  async function guidedFolder(target) {
+    const plain = lead => newScan({ kind: "investigate", target }, { lead });
+    if (typeof readPrograms !== "function") return plain("");
+    phase({ phase: "scanning" });
+    let list = null;
+    try { list = await readPrograms(); } catch { list = null; }
+    if (!list || list.ok !== true || !Array.isArray(list.programs)) return plain(""); // list incomplete: no uninstaller is offered (fail closed)
+    const det = detectAppForFolder(list.programs, target);
+    if (det.kind === "none") return plain("");
+    if (det.kind === "several") {
+      const names = det.programs.slice(0, 3).map(p => displayText(p.name, 40)).join(", ") + (det.programs.length > 3 ? " and others" : "");
+      return plain("Several installed programs match this folder (" + names + "), so no uninstaller was offered. Only leftovers are listed.");
+    }
+    const app = displayText(det.program.name, 80) || "the program";
+    if (!det.runnable) return plain("This folder belongs to " + app + ", but its uninstall command cannot be read exactly, so it is not run from here. Only leftovers are listed.");
+    // ASK FIRST: before anything is run, scanned or deleted.
+    let yes = false;
+    try { yes = (await ui.askUninstallFirst("This folder belongs to " + app + ". Run its own uninstaller first? It will run: " + cmdText(det.command) + " . If you say no, nothing is run and the app only looks for leftovers.")) === true; } catch { yes = false; }
+    if (!yes) return plain("");
+    const installTarget = leftoverTarget(det.program);
+    const ac = new AbortController();
+    uninstallAbort = ac;
+    phase({ phase: "uninstalling", detail: "Running the uninstaller of " + app + "..." });
+    let r = null;
+    try { r = await runProgramUninstaller({ exe: det.command.exe, args: det.command.args, signal: ac.signal }); } catch { r = null; }
+    finally { if (uninstallAbort === ac) uninstallAbort = null; }
+    if (!r || r.ok !== true) {
+      phase(r && r.reason === "stopped" ? { phase: "done", detail: TEXT.uninstallStopped } : { phase: "error", detail: TEXT.uninstallFailed });
+      return { ok: false, ...(r && r.reason === "stopped" ? { stopped: true } : {}) };
+    }
+    programById = new Map();
+    // REBOOT CHECK, right after the uninstaller exited: exit code 3010 / 1641, or a pending rename inside the app's folders.
+    let pending = null;
+    if (typeof readPendingRenames === "function") { try { pending = await readPendingRenames(); } catch { pending = null; } }
+    const rb = rebootAssessment({ code: r.code, pending, folders: [target, installTarget] });
+    if (rb.needed) {
+      noteRestart(app);
+      let go = false;
+      try {
+        go = (await ui.askRestartContinue("The uninstaller says Windows must restart to finish removing " + app + "." +
+          (rb.initiated ? " Windows may restart on its own, so save your work first." : "") +
+          " You can keep cleaning leftovers now and restart later. Continue?")) === true;
+      } catch { go = false; }
+      if (!go) { phase({ phase: "done", detail: TEXT.stoppedAfterUninstall }); return { ok: true, scanned: false, restartNeeded: true }; }
+    }
+    // SWEEP: the ordinary investigate scan, run only now, on the picked folder and on the app's install folder.
+    const dirs = [];
+    for (const d of [target, installTarget]) if (d && isDir(d) && !dirs.some(x => nk(x) === nk(d))) dirs.push(d);
+    if (dirs.length === 0) { phase({ phase: "done", detail: TEXT.gone }); return { ok: true, scanned: false, restartNeeded: rb.needed }; }
+    const codeNote = typeof r.code === "number" && r.code !== 0 && r.code !== 3010 && r.code !== EXIT_REBOOT_INITIATED ? "The uninstaller ended with code " + r.code + " (it may have been cancelled or failed)." : "";
+    const lead = "The uninstaller of " + app + " has finished." + (codeNote ? " " + codeNote : "") + " Below is what it left behind.";
+    return newScan({ kind: "investigate", target: dirs[0], ...(dirs[1] ? { also: dirs[1] } : {}), recheck: true, appName: app }, { lead });
   }
 
   // Re-checks the ids against the last scan. Returns the items to freeze, or throws "refused". Never touches the disk.
@@ -322,7 +403,24 @@ export function createController({
     return go;
   }
 
-  async function ritual(run) {
+  // After a guided run's delete: scan the same target(s) again (no phase change) and report what is still there.
+  async function recheck(request, chosen) {
+    let again = null;
+    try { again = await scan(request); if (!goodResult(again)) again = null; } catch { again = null; }
+    const still = chosen.filter(it => { try { fs.lstatSync(it.path); return true; } catch { return false; } });
+    const app = typeof request.appName === "string" ? request.appName : "";
+    if (still.length > 0) {
+      if (app) noteRestart(app);
+      const names = still.slice(0, 5).map(it => displayText(path.basename(it.path) || it.path, 60)).join(", ") + (still.length > 5 ? " and " + (still.length - 5) + " more" : "");
+      return "Re-check: " + plural(still.length, "item", "items") + " could not be removed (in use or waiting for a restart): " + names + ".";
+    }
+    if (!again) return "Re-check: the folder could not be scanned again.";
+    const chosenKeys = new Set(chosen.map(it => nk(it.path)));
+    const other = again.items.filter(it => it && it.selectable === true && typeof it.path === "string" && !chosenKeys.has(nk(it.path))).length;
+    return other === 0 ? "Re-check: nothing left." : "Re-check: everything you chose is gone; " + plural(other, "other item", "other items") + " you did not choose " + (other === 1 ? "is" : "are") + " still listed.";
+  }
+
+  async function ritual(run, post = null) {
     const { server } = run;
     let windowClosed = false;
     let handle = null;
@@ -338,11 +436,11 @@ export function createController({
     const closeWindow = () => { try { if (handle && typeof handle.close === "function") handle.close(); } catch { /* gone */ } };
     const ctx = { server, close: closeWindow, ended: false, keep: false };
     ritualCtx = ctx;
-    try { return await ritualLoop(run, server, closeWindow, () => windowClosed, ctx); }
+    try { return await ritualLoop(run, server, closeWindow, () => windowClosed, ctx, post); }
     finally { ctx.ended = true; if (!ctx.keep && ritualCtx === ctx) ritualCtx = null; } // a finished run's page stays until ritualClose
   }
 
-  async function ritualLoop(run, server, closeWindow, isWindowClosed, ctx) {
+  async function ritualLoop(run, server, closeWindow, isWindowClosed, ctx, post = null) {
     let state;
     let lastDone = -1;
     for (;;) {
@@ -377,11 +475,17 @@ export function createController({
       phase({ phase: "error", detail: TEXT.failed });
       return { ok: false };
     }
+    // RE-CHECK (guided folder runs only): scan the same target again and say what is left. Read-only.
+    let extra = "";
+    if (post) {
+      phase({ phase: "deleting", detail: "Re-checking what is left..." });
+      try { extra = await post(); } catch { extra = ""; }
+    }
     if (!s) { // the server finished, but its log line could not be read: say so, claim no numbers
-      phase({ phase: "done", detail: TEXT.doneNoAudit, keepView: ctx.keep });
+      phase({ phase: "done", detail: TEXT.doneNoAudit + (extra ? " " + extra : ""), keepView: ctx.keep });
       return { ok: true };
     }
-    phase({ phase: "done", detail: doneText(s), ...s, keepView: ctx.keep });
+    phase({ phase: "done", detail: doneText(s) + (extra ? " " + extra : ""), ...s, keepView: ctx.keep });
     return { ok: true, ...s };
   }
 
@@ -451,7 +555,7 @@ export function createController({
       return { ok: false };
     }
     currentRun = run;
-    return ritual(run);
+    return ritual(run, request.recheck === true ? () => recheck(request, chosen) : null);
   }
 
   // Closing the confirm window before the press is a decision worth keeping a record of (no token, no url).
@@ -576,7 +680,7 @@ export function createController({
       return { ok: !!r && r.ok === true };
     },
     async scanInvestigate() { return picked(() => ui.pickFile()); },
-    async scanFolder() { return picked(() => ui.pickFolder()); },
+    async scanFolder() { return picked(() => ui.pickFolder(), { guided: true }); },
 
     // From the results window: resolves the new view (with its diff) or rejects with a fixed message.
     async scanAgain() {
@@ -608,6 +712,7 @@ export function createController({
     async scanCancel() {
       if (scanAbort) scanAbort.abort();
       if (restoreAbort) restoreAbort.abort();
+      if (uninstallAbort) uninstallAbort.abort();
       return { ok: true };
     },
 

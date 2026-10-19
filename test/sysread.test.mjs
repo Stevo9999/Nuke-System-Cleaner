@@ -56,7 +56,7 @@ test("regQuery runs System32\\reg.exe by full path with the fixed array args and
 
 test("REG_KEYS is frozen with exactly the specified names and paths", () => {
   assert.ok(Object.isFrozen(REG_KEYS));
-  assert.deepEqual(Object.keys(REG_KEYS).sort(), ["oneDriveAccounts", "runHKCU", "runHKLM", "runOnceHKCU", "runOnceHKLM", "runWow", "services", "uninstallHKCU", "uninstallHKLM", "uninstallWow", "userShellFolders"]);
+  assert.deepEqual(Object.keys(REG_KEYS).sort(), ["oneDriveAccounts", "pendingRenames", "runHKCU", "runHKLM", "runOnceHKCU", "runOnceHKLM", "runWow", "services", "uninstallHKCU", "uninstallHKLM", "uninstallWow", "userShellFolders"]);
   assert.equal(REG_KEYS.uninstallWow.path, "HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall");
   assert.equal(REG_KEYS.uninstallHKCU.path, "HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall");
   assert.equal(REG_KEYS.runHKCU.path, "HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run");
@@ -69,6 +69,8 @@ test("REG_KEYS is frozen with exactly the specified names and paths", () => {
   assert.deepEqual([...REG_KEYS.userShellFolders.args], []);
   assert.equal(REG_KEYS.oneDriveAccounts.path, "HKCU\\SOFTWARE\\Microsoft\\OneDrive\\Accounts");
   assert.deepEqual([...REG_KEYS.oneDriveAccounts.args], ["/s", "/v", "UserFolder"]);
+  assert.equal(REG_KEYS.pendingRenames.path, "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager");
+  assert.deepEqual([...REG_KEYS.pendingRenames.args], ["/v", "PendingFileRenameOperations"], "read one value, no /s");
 });
 
 test("regQuery refuses any name not in REG_KEYS and never builds a key path from input", () => {

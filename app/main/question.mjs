@@ -4,7 +4,7 @@
 // Rules: one question at a time (a second concurrent ask is answered false at once and does not disturb the first); an answer
 // counts only while a question is pending and only once (late/duplicate answers are ignored); cancel() (window closed, quit,
 // failure to show) answers false.
-const KINDS = new Set(["permanent", "restore", "action"]);
+const KINDS = new Set(["permanent", "restore", "action", "folderapp", "restart"]);
 
 export function createQuestionBroker({ send }) {
   let pending = null; // { resolve, id }

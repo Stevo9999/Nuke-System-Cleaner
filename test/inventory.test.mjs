@@ -170,9 +170,12 @@ test("inventory: the exact programs and argument lists", () => {
   assert.ok(code("lib/wintools.mjs").includes('["shell32.dll,ShellExec_RunDLL", WINTOOLS[key].exe, ...WINTOOLS[key].args]'));
   assert.ok(code("run.mjs").includes('spawnFn(exe, ["url.dll,FileProtocolHandler", url], { shell: false, detached: true'));
   for (const f of ["lib/restore.mjs", "app/main/elevation.mjs"]) assert.ok(code(f).includes('spawnFn(psExe, ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded], { shell: false'), f);
-  // the eleven registry keys are all HK* paths in one frozen table
+  // the twelve registry keys are all HK* paths in one frozen table
   const keys = [...sys.matchAll(/mk\("(HK[A-Z]+)\\\\/g)].map((m) => m[1]);
-  assert.equal(keys.length, 11);
+  assert.equal(keys.length, 12);
+  // the restart check (read-only): exactly this key table entry, no new spawn site
+  assert.ok(sys.includes('pendingRenames: mk("HKLM\\\\SYSTEM\\\\CurrentControlSet\\\\Control\\\\Session Manager", ["/v", "PendingFileRenameOperations"]),'));
+  assert.ok(README.includes("twelve fixed keys") && README.includes("PendingFileRenameOperations"));
   // the two known-folder reads (read-only, fixed): exactly these paths and arguments, nothing built from input
   assert.ok(sys.includes('userShellFolders: mk("HKCU\\\\SOFTWARE" + CV + "Explorer\\\\User Shell Folders"),'));
   assert.ok(sys.includes('oneDriveAccounts: mk("HKCU\\\\SOFTWARE\\\\Microsoft\\\\OneDrive\\\\Accounts", ["/s", "/v", "UserFolder"]),'));});

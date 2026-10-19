@@ -59,7 +59,7 @@ async function boot(over) {
 
 test("phaseText exact strings for restore and ritual; unknown phase -> generic text", async () => {
   const { phaseText, PHASES } = await import("../../app/renderer/phases.js");
-  assert.deepEqual(PHASES, ["idle", "scanning", "results", "warning", "restore", "checking", "ritual", "deleting", "done", "error"]);
+  assert.deepEqual(PHASES, ["idle", "scanning", "results", "warning", "restore", "uninstalling", "checking", "ritual", "deleting", "done", "error"]);
   assert.equal(phaseText("restore"), "Windows is creating a system restore point");
   assert.equal(phaseText("ritual"), "The final confirmation is below: turn the key, lift the glass cover and press the red button");
   assert.equal(phaseText("done", "Freed 3 MB"), "Freed 3 MB");
@@ -412,7 +412,7 @@ test("R46: relaunch button and the not-offered note follow canRelaunchAdmin; fol
   const { doc } = await boot();
   const hint = find(doc, e => e.textContent === FOLDER_HINT)[0];
   assert.ok(hint);
-  assert.match(FOLDER_HINT, /Looks into a folder/);
+  assert.match(FOLDER_HINT, /runs? that program's own uninstaller first|run that program's own uninstaller first/);
 });
 
 test("R53: every home button has its approved description beside it and linked through aria-describedby", async () => {
@@ -421,7 +421,7 @@ test("R53: every home button has its approved description beside it and linked t
   const want = [
     ["Scan", "Smart Scan. Looks only in a fixed list of safe places (temp files, caches, crash dumps, thumbnails, your Recycle Bin) and lists what could be freed. Nothing is deleted yet."],
     ["Manually find a file to investigate", "Pick a file, shortcut or program. The app follows it to the program it belongs to and lists the leftover files, folders and shortcuts that program made."],
-    ["Pick a folder to investigate", "Looks into a folder and checks whether other programs, sub-folders or shortcuts use its contents, so you can see what is safe to remove together."],
+    ["Pick a folder to investigate", "Pick a folder. If it belongs to an installed program, the app asks whether to run that program's own uninstaller first (you can say no), then lists the leftovers, and checks again after you delete them. If Windows must restart to finish, you are told. Nothing is deleted without your confirmation."],
     ["Settings", "Choose whether Windows makes a restore point before deleting (on by default)."],
   ];
   for (const [label, text] of want) {
@@ -514,4 +514,29 @@ test("restore point step shows a moving progress bar with the seconds so far; it
   assert.equal(bar().hidden, false);
   app.destroy();
   assert.equal(bar().hidden, true, "no timer is left running after destroy");
+});
+
+test("guided folder flow UI: the two new question kinds have their own buttons; the uninstaller phase shows Stop waiting; the restart notice persists", async () => {
+  const { doc, nuke, app } = await boot();
+  app.onQuestion({ id: 1, kind: "folderapp", message: "This folder belongs to X. Run its own uninstaller first?" });
+  assert.ok(btn(doc, "Yes, run the uninstaller first") && btn(doc, "No, only look for leftovers"));
+  app.onQuestion({ id: 2, kind: "restart", message: "Continue?" });
+  assert.ok(btn(doc, "Yes, keep cleaning leftovers") && btn(doc, "No, stop here"));
+  nuke.handlers.phase({ phase: "uninstalling", detail: "Running the uninstaller of X..." });
+  const stop = btn(doc, "Stop waiting for the uninstaller");
+  assert.equal(stop.parent.hidden, false);
+  assert.equal(find(doc, e => e.getAttribute("class") === "phase-text")[0].textContent.includes("Running the uninstaller of X..."), true);
+  assert.ok(find(doc, e => e.tagName === "button" && e.textContent === "Back").some(b => b.parent.hidden === true), "no Back while the uninstaller runs");
+  await stop.fire("click");
+  assert.ok(nuke.calls.some(c => c[0] === "cancelScan"));
+  const notices = () => find(doc, e => e.getAttribute("class") === "notice");
+  assert.ok(notices().every(n => n.hidden));
+  nuke.handlers.phase({ phase: "done", detail: "Stopped.", notice: "Restart Windows when you are ready to finish removing X." });
+  assert.ok(notices().length >= 2 && notices().every(n => !n.hidden && n.textContent === "Restart Windows when you are ready to finish removing X."));
+  nuke.handlers.phase({ phase: "idle" });
+  assert.ok(notices().every(n => !n.hidden), "still shown on the start screen");
+  nuke.handlers.phase({ phase: "done", detail: "5 items deleted. Re-check: nothing left.", keepView: true, notice: "Restart Windows when you are ready to finish removing X." });
+  const bar = find(doc, e => e.getAttribute("class") === "ritual-notice")[0];
+  assert.equal(bar.hidden, false);
+  assert.match(bar.textContent, /Restart Windows when you are ready/);
 });
