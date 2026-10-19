@@ -94,3 +94,46 @@ test("the key snaps off in the lock after it has turned: stub stays, upper part 
   assert.match(src, /keyBreak\.moving = false/);
   assert.match(src, /KEY_STUB_H = 0\.4/);
 });
+
+// ---- the computer that gets blown up (user request) ----
+const pcBlock = script.slice(script.indexOf("/* ================= the computer that gets blown up"), script.indexOf("/* ================= press, blast"));
+test("a low-poly computer (monitor, tower, keyboard) stands on a small desk in the room, built from primitives only", () => {
+  assert.ok(pcBlock.length > 2000);
+  for (const part of ["monitor shell", "tower", "keyboard", "mouse"]) assert.match(pcBlock, new RegExp(part));
+  assert.match(pcBlock, /scene\.add\(pc\.group\)/);
+  assert.doesNotMatch(pcBlock, /GLTFLoader|OBJLoader|TextureLoader|new Image|\.load\(/, "no external models or textures");
+  const pos = /PC_POS = new THREE\.Vector3\((-?[\d.]+),\s*PC_FLOOR,\s*(-?[\d.]+)\)/.exec(pcBlock);
+  assert.ok(pos && Math.abs(Number(pos[1])) <= 24 && Number(pos[2]) > -30, "inside the room, near the default view");
+});
+test("the explosion is purely visual: it starts only after the server accepted the confirm and never touches server, lock, gating or countdown", () => {
+  const pressSrc = /async function press\(\) \{[\s\S]*?\n\}/.exec(script)[0];
+  assert.ok(pressSrc.indexOf("pcStart()") > pressSrc.indexOf("postApi('confirm')"), "after the confirm call");
+  assert.ok(pressSrc.indexOf("pcStart()") > pressSrc.indexOf("stage = 'pressed'"), "only in the pressed stage");
+  assert.equal([...script.matchAll(/^\s*pcStart\(\);/gm)].length, 1, "exactly one call, inside press()");
+  assert.doesNotMatch(pcBlock, /postApi|getJson|fetch\(|EventSource|serverState|doUnlock|enterUnlocked|canPress|deadline|stage\s*=[^=]|keyState|glassAngle|doneEvent|blastDone/);
+  assert.match(script, /pcUpdate\(dt\);/);
+});
+test("the sequence: red warning screen, flash, shockwave rings, pieces with gravity and spin, mushroom smoke, blast sound via sfx", () => {
+  assert.match(pcBlock, /FATAL ERROR/);
+  assert.match(pcBlock, /PointLight\(0xffa040/);
+  assert.match(pcBlock, /RingGeometry/);
+  assert.match(pcBlock, /f\.vel\.y -= 60 \* dt/);
+  assert.match(pcBlock, /f\.spin/);
+  assert.match(pcBlock, /stem: \[\]/); assert.match(pcBlock, /cap: \[\]/);
+  assert.match(pcBlock, /sfx\('blast', 0\.7\)/, "the existing blast sound through the existing helper");
+  assert.ok(!/new Audio/.test(pcBlock));
+});
+test("reduced motion: flash only, no debris physics, rings or smoke; everything made for the effect is disposed afterwards", () => {
+  assert.match(pcBlock, /prefers-reduced-motion: reduce/);
+  const boom = /function pcBoom\(\) \{[\s\S]*?\n\}/.exec(pcBlock)[0];
+  const r = boom.indexOf("if (pc.reduced)");
+  assert.ok(r > 0 && r < boom.indexOf("RingGeometry") && r < boom.indexOf("SphereGeometry") && r < boom.indexOf("pc.flying.push"));
+  assert.match(boom, /if \(pc\.reduced\) \{[^}]*return;/);
+  const disp = /function pcDispose\(\) \{[\s\S]*?\n\}/.exec(pcBlock)[0];
+  assert.match(disp, /scene\.remove\(o\)/); assert.match(disp, /d\.dispose\(\)/);
+  assert.match(pcBlock, /if \(u > 5\.2\) pcDispose\(\)/, "ends before the existing blast at 7 s");
+  assert.match(script, /setTimeout\(blast, 7000\)/, "the existing blast flow is unchanged");
+});
+test("the 3D scene stops rendering once the opaque result map is showing", () => {
+  assert.match(script, /if \(!mapShown\) renderer\.render\(scene, camera\)/);
+});

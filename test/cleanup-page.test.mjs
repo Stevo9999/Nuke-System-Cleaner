@@ -238,7 +238,7 @@ function runMap(info, done, { steps = [0, 1e6], reduced = false, close = false }
   const grab = re => re.exec(script)[0];
   const code = [grab(/function fmt\(b\) \{.*\}\n/), grab(/const cleanText = .*\n/), grab(/const short = .*\n/), grab(/const cleanPath = .*\n/), grab(/const put = .*\n/), grab(/const el = .*\n/),
     script.slice(script.indexOf("/* squarify:begin */"), script.indexOf("/* squarify:end */")),
-    grab(/const num = .*\n/), grab(/const normP = .*\n/), viewSrc()].join("\n");
+    grab(/const num = .*\n/), grab(/const normP = .*\n/), grab(/const CELL_CAP = .*\n/), grab(/const driveOf = .*\n/), viewSrc()].join("\n");
   const nodes = {}, draws = [], listeners = [], removed = [];
   const mk = sel => nodes[sel] ||= (() => {
     const n = { text: "", writes: 0, classList: { s: new Set(), add(c) { this.s.add(c); }, remove(c) { this.s.delete(c); } }, style: {}, children: [], inert: false,
@@ -287,9 +287,11 @@ test("disk map run: real paths, differing totals, covered item is NOT counted as
   assert.match(r.nodes["#maptext"].text, /2 item\(s\) were NOT removed/, "keep.txt failed + the refused one; the covered item is not counted");
   const li = r.nodes["#results"].children.map(c => c.textContent);
   assert.equal(li.length, 5);
-  assert.match(li[0], /^Deleted 1000 B/); assert.match(li[1], /NOT removed \(failed: EPERM\)/);
-  assert.equal(li[2], "Removed with " + P.big + ": " + P.inner);
-  assert.match(li[3], /NOT removed \(refused before launch: protected\).*<b>x<\/b>/, "markup stays literal text");
+  // not-removed items are listed first (they matter most and must never fall behind a cap), then the rest in selection order
+  assert.match(li[0], /NOT removed \(failed: EPERM\)/);
+  assert.match(li[1], /NOT removed \(refused before launch: protected\).*<b>x<\/b>/, "markup stays literal text");
+  assert.match(li[2], /^Deleted 1000 B/);
+  assert.equal(li[3], "Removed with " + P.big + ": " + P.inner);
   assert.match(li[4], /^Deleted 0 B/);
   // cells: only big and keep (inner is covered, evil refused, empty has 0 bytes)
   assert.equal(cellCount(runMap(baseInfo(), goodDone(), { steps: [0] })), 2);
@@ -304,7 +306,7 @@ test("disk map run: a plain already-gone item is labelled and, like a covered on
   const info = baseInfo(); info.items.push({ path: String.raw`C:\w\gone.txt`, isDir: false, bytes: 7 });
   const done = goodDone(); done.results.push(res(String.raw`C:\w\gone.txt`, "skipped", { reason: "already gone" }));
   const r = runMap(info, done);
-  assert.equal(r.nodes["#results"].children[5].textContent, "Already gone: " + String.raw`C:\w\gone.txt`);
+  assert.equal(r.nodes["#results"].children[r.nodes["#results"].children.length - 1].textContent, "Already gone: " + String.raw`C:\w\gone.txt`);
   assert.match(r.nodes["#maptext"].text, /2 item\(s\) were NOT removed/);
 });
 
@@ -341,7 +343,7 @@ test("disk map run: result pairing falls back to path; stray, missing and duplic
   const shuffled = { ...goodDone(), results: [res(P.zero, "deleted"), res(String.raw`C:\stray\x`, "deleted", { bytes: 99 }), res(P.big, "deleted", { bytes: 1000 }), res(P.evil, "skipped", { reason: "r" })] };
   let r = runMap(baseInfo(), shuffled);
   const li = r.nodes["#results"].children.map(c => c.textContent);
-  assert.match(li[0], /^Deleted 1000 B/); assert.match(li[1], /NOT removed \(no result reported\)/);
+  assert.match(li[0], /NOT removed \(no result reported\)/); assert.match(li[3], /^Deleted 1000 B/);
   assert.ok(!li.some(t => /stray/.test(t)), "stray result is inert");
   assert.equal(r.nodes["#verdict"].text, "DETONATED");
   const dup = { items: [{ path: P.keep, bytes: 5 }, { path: P.keep, bytes: 0, coveredBy: P.keep }], drives: {} };
@@ -363,6 +365,39 @@ test("disk map run: hostile numbers never produce NaN, Infinity or negative text
   }
   assert.equal(runMap({ items: [], drives: {} }, { freedBytes: 0, sumBytes: 0, measured: true, results: [] }).nodes["#verdict"].text, "NOTHING DELETED");
   assert.equal(runMap({ items: [{ path: "x", bytes: 1 }], drives: {} }, { measured: true, results: "nope" }).nodes["#verdict"].text, "NOTHING DELETED");
+});
+
+// A real run deleted 3585 items and the page froze: one cell, one spark burst and one log row per item. Budgets now hold for any size.
+test("disk map run: 4000 items stay within the render budgets (<=300 cells + one 'other' cell, chunked and capped log) and the totals stay exact", () => {
+  const N = 4000, items = [], results = [];
+  let failed = 0, sum = 0;
+  for (let i = 0; i < N; i++) {
+    const p = String.raw`C:\w\f` + i + ".bin", bytes = 1000 + ((i * 7919) % 5000), bad = i % 97 === 0;
+    items.push({ path: p, isDir: false, bytes });
+    results.push(bad ? res(p, "failed", { reason: "EBUSY" }) : res(p, "deleted", { bytes }));
+    if (bad) failed++; else sum += bytes;
+  }
+  const info = { items, drives: { "C:\\": { total: 1e9, free: 1e8 } } };
+  const done = { freedBytes: sum, sumBytes: sum, measured: true, results };
+  const first = runMap(info, done, { steps: [0] });
+  assert.ok(cellCount(first) <= 300 + 1, "cells: " + cellCount(first));
+  assert.ok(cellCount(first) >= 300, "the biggest items do get their own cells");
+  assert.ok(first.nodes["#results"].children.length <= 200, "the log is built in chunks, not all at once: " + first.nodes["#results"].children.length);
+  const all = runMap(info, done, { steps: Array.from({ length: 40 }, (_, i) => i * 0.5).concat([1e6]) });
+  const li = all.nodes["#results"].children.map(c => c.textContent);
+  assert.ok(li.length <= failed + 500 + 1, "log is capped: " + li.length);
+  assert.ok(li.slice(0, failed).every(t => /^NOT removed \(failed: EBUSY\)/.test(t)), "every not-removed item is listed first");
+  assert.match(li[li.length - 1], new RegExp("^\\.\\.\\. and " + (N - Math.max(failed, 500)) + " more \\(all of them are in the audit log\\)$"));
+  assert.ok(all.texts.some(t => /other \(3700 items, /.test(t)), "one aggregated 'other (N items, size)' cell");
+  assert.equal(all.nodes["#verdict"].text, "DETONATED");
+  assert.match(all.nodes["#maptext"].text, new RegExp(failed + " item\\(s\\) were NOT removed"), "the not-removed count covers all items, not only the drawn ones");
+  assert.equal(all.nodes["#freed"].text, "Free space went up by " + (sum >= 1048576 ? (sum / 1048576).toFixed(1) + " MB" : "x"));
+  assert.match(all.nodes["#maptext"].text, /which matches/);
+  assert.equal(all.pending(), 0, "no frame is left queued when the animation and the log are finished");
+  // the aggregated cell mixes deleted and not-removed items: it is drawn as NOT removed with the exact split, never as a clean sweep
+  const aggFail = Math.round(3700 / 97), aggText = all.texts.find(t => /deleted, \d+ NOT removed/.test(t));
+  assert.ok(aggText, "mixed 'other' cell states the split");
+  assert.ok(Math.abs(Number(/(\d+) NOT removed/.exec(aggText)[1]) - aggFail) <= 2);
 });
 
 test("disk map run: reduced motion draws the final state once and queues no animation frame", () => {
