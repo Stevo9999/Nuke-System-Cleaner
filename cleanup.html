@@ -764,10 +764,10 @@ function showDiskMap() {
         + (anyDeleted ? 'The items reported deleted add up to ' + fmt(sumBytes) + '.' : 'No item was deleted.') + keptNote;
     } else if (!anyDeleted) {
       head = 'Nothing freed';
-      note = 'No item was deleted.' + (freedBytes > 0 ? ' The drive shows ' + fmt(freedBytes) + ' more free space than before, which this run did not cause (other programs can free space too).' : '') + keptNote;
+      note = 'No item was deleted.' + (freedBytes > 0 ? ' The drive shows ' + fmt(freedBytes) + ' more free space than before, which this run did not cause (another program freed it).' : '') + keptNote;
     } else {
       head = 'Free space went up by ' + fmt(freedBytes);
-      note = 'The drive reports ' + fmt(freedBytes) + ' more free space than before (measured, not estimated); other programs can change this too. The deleted items add up to ' + fmt(sumBytes)
+      note = 'The drive reports ' + fmt(freedBytes) + ' more free space than before (measured, not estimated). It can be a little off if other programs were using the disk at the same time. The deleted items add up to ' + fmt(sumBytes)
         + (freedBytes !== sumBytes ? ', which differs from the real figure by ' + Math.abs(freedBytes - sumBytes).toLocaleString('en-US') + ' bytes; the real figure is the one shown.' : ', which matches.') + keptNote;
     }
     put($('#freed'), head); put($('#maptext'), note);

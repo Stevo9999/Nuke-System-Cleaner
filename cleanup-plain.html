@@ -150,7 +150,7 @@ function showDone(e) {
   $('#step1').hidden = true; $('#step2').hidden = true;
   put($('#summary'), deleted + ' of ' + results.length + ' items deleted.');
   say('Finished. Use "Done - back to start" in the bar above to return.');
-  put($('#freed'), e.measured === true ? 'Free space went up by ' + fmt(e.freedBytes) + ' (other programs can change this).' : 'The freed space could not be measured.');
+  put($('#freed'), e.measured === true ? 'Free space went up by ' + fmt(e.freedBytes) + ' (measured from the drive; it can be a little off if other programs were using the disk at the same time).' : 'The freed space could not be measured.');
   const ul = $('#results'); ul.replaceChildren();
   for (const r of results) {
     if (!r || typeof r !== 'object') continue;

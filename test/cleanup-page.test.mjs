@@ -542,6 +542,6 @@ test("19B: server text is sanitised before display (control, bidi, zero-width, l
 
 test("19B: freed-space wording is neutral about other programs; no 'Freed ' headline", () => {
   assert.match(script, /'Free space went up by ' \+ fmt\(freedBytes\)/);
-  assert.match(script, /other programs can change this/);
+  assert.match(script, /if other programs were using the disk at the same time/);
   assert.doesNotMatch(script, /head = 'Freed '/);
 });

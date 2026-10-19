@@ -116,7 +116,7 @@ function doneText(s) {
   const parts = [plural(s.deleted, "item deleted", "items deleted")];
   if (s.failed) parts.push(s.failed + " could not be deleted");
   if (s.skipped) parts.push(s.skipped + " skipped");
-  return parts.join(", ") + ". " + (s.measured ? "Free space went up by " + fmtBytes(s.freedBytes) + " (other programs can change this)." : "The freed space could not be measured.");
+  return parts.join(", ") + ". " + (s.measured ? "Free space went up by " + fmtBytes(s.freedBytes) + " (measured from the drive; it can be a little off if other programs were using the disk at the same time)." : "The freed space could not be measured.");
 }
 
 export function createController({
