@@ -87,7 +87,7 @@ class Node_ {
 }
 function fakeDoc() {
   const ids = {};
-  for (const id of ["title", "notice", "notes", "diff", "rows", "report", "report-list", "admin", "summary", "cancel", "again", "delete"]) ids[id] = new Node_(id);
+  for (const id of ["title", "notice", "notes", "diff", "rows", "report", "report-list", "admin", "summary", "cancel", "again", "delete", "sort-name", "sort-size", "sort-group", "sort-sure", "sort-change", "th-name", "th-size", "th-group", "th-sure", "th-change"]) ids[id] = new Node_(id);
   ids.delete.disabled = true;
   return { ids, createElement: (t) => new Node_(t), getElementById: (id) => ids[id] };
 }
@@ -111,7 +111,7 @@ test("mount: renders hostile text as text, report section, admin line, buttons c
   const { ids } = doc;
   assert.equal(ids.rows.children.length, 3);                      // companion hidden
   assert.equal(ids.rows.children[2].all((n) => n.tag === "input")[0].disabled, true); // protected
-  assert.equal(ids.rows.children[0].all((n) => n.tag === "input")[0].checked, true);
+  assert.equal(ids.rows.children[1].all((n) => n.tag === "input")[0].checked, true); // Parent is second: the table starts biggest-first (Medium 100 B, Parent 10 B, Prot 1 B)
   assert.equal(ids.report.hidden, false);
   assert.match(ids["report-list"].textContent, /Svc/);
   assert.equal(ids.admin.textContent, "Could free 3 MB more in administrator mode");
@@ -125,14 +125,60 @@ test("mount: renders hostile text as text, report section, admin line, buttons c
   assert.deepEqual(calls.pop(), ["close"]);
 
   // untick parent -> delete disabled
-  const box = ids.rows.children[0].all((n) => n.tag === "input")[0];
+  const box = ids.rows.children[1].all((n) => n.tag === "input")[0]; // Parent: second row, the table is biggest-first
   box.checked = false; await box.fire("change");
   assert.equal(ids.delete.disabled, true);
   assert.equal(ids.summary.textContent, "Nothing ticked.");
 
   await ids.again.fire("click");
   assert.equal(ids.diff.textContent, "0 new, 1 gone, 1 resized (gone: old)");
-  assert.match(ids.rows.children[0].textContent, /<img src=x onerror=alert\(1\)>/); // inert text
-  assert.equal(ids.rows.children[0].all((n) => n.tag === "img").length, 0);
+  const hostile = ids.rows.children.find((tr) => /<img src=x onerror=alert\(1\)>/.test(tr.textContent)); // inert text, wherever the sort puts it
+  assert.ok(hostile);
+  assert.equal(hostile.all((n) => n.tag === "img").length, 0);
 
+});
+
+
+test("sortRows: size biggest-first by default, unknown sizes last, name/sure/change/group sort, ties by name, input untouched", async () => {
+  const { sortRows } = await import("../../app/renderer/results.js");
+  const rows = [
+    { id: "a", label: "beta", bytes: 10, group: "exclusive", confidence: "high", badge: "" },
+    { id: "b", label: "alpha", bytes: 10, group: "shared", confidence: "low", badge: "new" },
+    { id: "c", label: "gamma", bytes: 999, group: "exclusive", confidence: "medium", badge: "resized" },
+    { id: "d", label: "delta", bytes: null, group: "protected", confidence: "", badge: "" },
+    { id: "e", label: "file10", bytes: 1, group: "exclusive", confidence: "high", badge: "" },
+    { id: "f", label: "file9", bytes: 1, group: "exclusive", confidence: "high", badge: "" },
+  ];
+  const ids = (k, d) => sortRows(rows, k, d).map((r) => r.id).join("");
+  assert.equal(ids("size", "desc"), "cbafed", "biggest first; equal sizes by name; unknown last");
+  assert.equal(ids("size", "asc"), "febacd", "smallest first; unknown still last");
+  assert.equal(ids("name", "asc"), "badfec", "natural name order (file9 before file10)");
+  assert.equal(ids("name", "desc"), "cefdab");
+  assert.equal(ids("sure", "desc"), "afecbd", "high, medium, low, none; ties by name");
+  assert.equal(ids("change", "desc"), "bcadfe", "new, size changed, unchanged");
+  assert.deepEqual(rows.map((r) => r.id), ["a", "b", "c", "d", "e", "f"], "the input array is not reordered");
+  assert.deepEqual(sortRows([], "size", "desc"), []);
+});
+
+test("mount: the table starts biggest-first; clicking a heading sorts by it and a second click reverses it; arrows and aria-sort follow", async () => {
+  const doc = fakeDoc();
+  const api = { getResults: async () => viewFixture(), closeResults() {}, scanAgain: async () => viewFixture(), deleteSelected: async () => ({}), getStatus: async () => ({}) };
+  const { mount } = await import("../../app/renderer/results.js");
+  mount(doc, api);
+  await new Promise((r) => setImmediate(r));
+  const order = () => doc.ids.rows.children.map((tr) => tr.all((n) => n.attrs && n.attrs["aria-label"]).map((n) => n.attrs["aria-label"].replace("Delete ", ""))[0]).join(",");
+  assert.equal(order(), "Medium,Parent,Prot");
+  assert.equal(doc.ids["sort-size"].textContent, "Size \u25BC");
+  assert.equal(doc.ids["th-size"].attrs["aria-sort"], "descending");
+  assert.equal(doc.ids["th-name"].attrs["aria-sort"], "none");
+  await doc.ids["sort-name"].fire("click");
+  assert.equal(order(), "Medium,Parent,Prot", "A to Z");
+  assert.equal(doc.ids["sort-name"].textContent, "Name \u25B2");
+  await doc.ids["sort-name"].fire("click");
+  assert.equal(order(), "Prot,Parent,Medium", "Z to A");
+  assert.equal(doc.ids["th-name"].attrs["aria-sort"], "descending");
+  await doc.ids["sort-size"].fire("click");
+  assert.equal(order(), "Medium,Parent,Prot", "size starts biggest-first again");
+  await doc.ids["sort-size"].fire("click");
+  assert.equal(order(), "Prot,Parent,Medium", "second click: smallest first");
 });

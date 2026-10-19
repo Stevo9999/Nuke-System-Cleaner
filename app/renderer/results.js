@@ -28,6 +28,37 @@ const rowsOf = (view) => (view && Array.isArray(view.rows) ? view.rows : []);
 const GROUP_TEXT = { exclusive: "Only used by this", shared: "Shared with other programs", protected: "Protected" };
 const SURE_TEXT = { high: "Very sure", medium: "Fairly sure", low: "Not sure" };
 const STARTUP_HELP = "View only: this app does not change start-up programs. To switch one off, press Ctrl+Shift+Esc, open Startup apps and turn it off.";
+/**
+ * Table order. key: "name" | "size" | "group" | "sure" | "change"; dir: "asc" | "desc". Rows without a size always go last for
+ * "size"; ties are broken by name so the order is stable. Returns a new array (the view's own order is never changed).
+ */
+const SURE_RANK = { high: 3, medium: 2, low: 1 };
+export const SORT_KEYS = ["name", "size", "group", "sure", "change"];
+export function sortRows(rows, key, dir) {
+  const sign = dir === "asc" ? 1 : -1;
+  const text = (r) => String(r.label || "").toLowerCase();
+  const byName = (a, b) => text(a).localeCompare(text(b), "en", { numeric: true });
+  const groupOf = (r) => String(typeof r.category === "string" && r.category ? r.category : GROUP_TEXT[r.group] || r.group || "").toLowerCase();
+  const changeOf = (r) => (r.badge === "new" ? 2 : r.badge === "resized" ? 1 : 0);
+  const num = (r) => (typeof r.bytes === "number" && Number.isFinite(r.bytes) ? r.bytes : null);
+  const cmp = (a, b) => {
+    if (key === "size") {
+      const x = num(a), y = num(b);
+      if (x === null && y === null) return byName(a, b);
+      if (x === null) return 1; // unknown sizes stay at the bottom in either direction
+      if (y === null) return -1;
+      return x === y ? byName(a, b) : sign * (x - y);
+    }
+    let d = 0;
+    if (key === "name") d = byName(a, b);
+    else if (key === "group") d = groupOf(a).localeCompare(groupOf(b), "en");
+    else if (key === "sure") d = (SURE_RANK[a.confidence] || 0) - (SURE_RANK[b.confidence] || 0);
+    else if (key === "change") d = changeOf(a) - changeOf(b);
+    return d === 0 ? byName(a, b) : sign * d;
+  };
+  return rows.slice().sort(cmp);
+}
+
 const isReportOnly = (r) => r.group === "report-only";
 const isCompanion = (r) => typeof r.companionOf === "string" && r.companionOf !== "";
 
@@ -103,6 +134,8 @@ export function mount(doc, api) {
   let manual = new Map(); // id -> true/false, only for boxes the user toggled by hand
   let busy = false;
   let identityUnknown = false;
+  let sortKey = "size"; // biggest items first until the user clicks a column heading
+  let sortDir = "desc";
   let canRelaunchAdmin = false; // R46: the "more in administrator mode" nudge only shows when relaunch is really offered
 
   function refreshSummary() {
@@ -163,7 +196,7 @@ export function mount(doc, api) {
     }
 
     clear(tbody);
-    for (const r of mainRows(view)) {
+    for (const r of sortRows(mainRows(view), sortKey, sortDir)) {
       const tr = el(doc, "tr", "item");
       const c1 = el(doc, "td");
       const box = doc.createElement("input");
@@ -224,6 +257,7 @@ export function mount(doc, api) {
     if (det) det.hidden = rep.length === 0;
     $("report").hidden = false;
 
+    paintSortHeads();
     refreshSummary();
     if (view.scanKind === "startup") showStartupOnly(rep.length);
   }
@@ -237,6 +271,26 @@ export function mount(doc, api) {
     const det = $("report-details"); if (det) det.open = true;
     const none = $("report-none"); if (none) { none.textContent = "No start-up programs were found."; none.hidden = count > 0; }
     $("summary").textContent = STARTUP_HELP;
+  }
+
+  // Click a column heading to sort by it; click it again to reverse. Size starts biggest-first, the others A to Z.
+  const ARROW = { asc: " \u25B2", desc: " \u25BC" };
+  const HEAD_TEXT = { name: "Name", size: "Size", group: "Used by", sure: "How sure", change: "Change" };
+  function paintSortHeads() {
+    for (const k of SORT_KEYS) {
+      const b = $("sort-" + k), th = $("th-" + k);
+      if (b) b.textContent = HEAD_TEXT[k] + (k === sortKey ? ARROW[sortDir] : "");
+      if (th && typeof th.setAttribute === "function") th.setAttribute("aria-sort", k === sortKey ? (sortDir === "asc" ? "ascending" : "descending") : "none");
+    }
+  }
+  for (const k of SORT_KEYS) {
+    const b = $("sort-" + k);
+    if (!b || typeof b.addEventListener !== "function") continue;
+    b.addEventListener("click", () => {
+      if (sortKey === k) sortDir = sortDir === "asc" ? "desc" : "asc";
+      else { sortKey = k; sortDir = k === "size" ? "desc" : "asc"; }
+      if (view) render(view, false);
+    });
   }
 
   $("cancel").addEventListener("click", () => { api.closeResults(); });

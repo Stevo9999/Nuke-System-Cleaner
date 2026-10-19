@@ -36,3 +36,6 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .report li.grp { list-style: none; margin: 12px 0 4px -18px; font-weight: 600; color: #ececf2; }
 
 [hidden] { display: none !important; }
+
+.found th .sort { all: unset; cursor: pointer; font-weight: 600; color: inherit; }
+.found th .sort:hover, .found th .sort:focus-visible { text-decoration: underline; }
