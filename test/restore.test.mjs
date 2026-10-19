@@ -69,7 +69,7 @@ test("not elevated -> outer script with Start-Process -Verb RunAs; elevated -> i
   assert.doesNotMatch(outer, /Checkpoint-Computer/); // only inside the nested encoded inner script
   const nested = decode(outer.match(/'-EncodedCommand','([A-Za-z0-9+/=]+)'/)[1]);
   assert.equal(nested, direct);
-  assert.match(direct, /Checkpoint-Computer -Description 'Nuke-Uninstaller 0123456789abcdef' -RestorePointType MODIFY_SETTINGS -WarningVariable w -ErrorAction Stop/);
+  assert.match(direct, /Checkpoint-Computer -Description 'Nuke System Cleaner 0123456789abcdef' -RestorePointType MODIFY_SETTINGS -WarningVariable w -ErrorAction Stop/);
   assert.match(direct, /Get-ComputerRestorePoint/);
   assert.doesNotMatch(direct, /Start-Process/);
 });
@@ -91,7 +91,7 @@ test("scripts write no file and read no file: the outcome travels only as an exi
 test("script text: description carries the hex runId; psExe with a quote is doubled; numeric tokens only inside the encoded script", () => {
   const psExe = "C:\\Users\\O'Brien\u2019x\\powershell.exe";
   const { inner, outer } = restoreScripts({ runId: RUN_ID, psExe });
-  assert.ok(inner.includes("'Nuke-Uninstaller 0123456789abcdef'"));
+  assert.ok(inner.includes("'Nuke System Cleaner 0123456789abcdef'"));
   assert.ok(outer.includes("'C:\\Users\\O''Brien\u2019\u2019x\\powershell.exe'"));
   assert.ok(!outer.includes("O'Brien"));
   assert.equal((inner.match(/['\u2018\u2019\u201A\u201B]/g) || []).length % 2, 0);

@@ -180,7 +180,7 @@ test("companions of ticked ids are added by main; ids are de-duplicated; shared 
     assert.equal(startRun.calls.length, 1);
     const sel = startRun.calls[0].sel;
     assert.deepEqual(sel.paths.slice().sort(), [parent.path, comp.path, shared.path].sort());
-    assert.equal(sel.sessionId, "nuke-uninstaller");
+    assert.equal(sel.sessionId, "nuke-system-cleaner");
     assert.deepEqual(sel.livePaths, []);
     assert.ok(sel.protectedPaths.includes(path.join(t.root, "Documents")), "app protected paths are in the frozen selection");
   } finally { t.cleanup(); }

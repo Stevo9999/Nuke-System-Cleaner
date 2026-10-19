@@ -1,5 +1,5 @@
 // scripts/package.mjs: build a portable (non-asar) Windows x64 copy of the app and put it in
-//   <LOCALAPPDATA>\Programs\Nuke-Uninstaller\<version>
+//   <LOCALAPPDATA>\Programs\Nuke System Cleaner\<version>
 // Run it with `npm run package` AFTER `@electron/packager` has been installed (it is not installed by default; see README).
 //
 // What it does: calls @electron/packager through its JavaScript API (asar:false, win32, x64) into ./dist, then copies the
@@ -12,10 +12,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const APP_NAME = "Nuke-Uninstaller";
+export const APP_NAME = "Nuke System Cleaner";
 const VERSION_RE = /^\d+\.\d+\.\d+$/;
 
-/** <LOCALAPPDATA>\Programs\Nuke-Uninstaller\<version>. Throws for a bad version or a LOCALAPPDATA that is not an absolute drive path. */
+/** <LOCALAPPDATA>\Programs\Nuke System Cleaner\<version>. Throws for a bad version or a LOCALAPPDATA that is not an absolute drive path. */
 export function packageTarget(env, version) {
   if (typeof version !== "string" || !VERSION_RE.test(version)) throw new TypeError("version must look like 1.2.3");
   const local = env && typeof env === "object" ? env.LOCALAPPDATA : undefined;

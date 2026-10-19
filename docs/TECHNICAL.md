@@ -1,4 +1,4 @@
-# Nuke-Uninstaller
+# Nuke - System Cleaner
 
 A Windows app that finds files that are safe to remove, shows them to you, and deletes the ones you pick only after you
 personally turn a key and press a big red button in a 3D room. This repository also contains the older `/nuke` command
@@ -105,7 +105,7 @@ and your OK before you run it. `npm start` fails until it has been run once.
 This starts Electron on the source tree. A packaged copy (no `npm` needed afterwards) is built by `npm run package` into
 
 ```
-%LOCALAPPDATA%\Programs\Nuke-Uninstaller\<version>\Nuke-Uninstaller.exe
+%LOCALAPPDATA%\Programs\Nuke System Cleaner\<version>\Nuke System Cleaner.exe
 ```
 
 The package step **refuses to run if that folder already exists** (it never deletes or overwrites). It needs the
@@ -114,7 +114,7 @@ build has **not** been made or smoke-tested yet. Pending steps, to be run after 
 
 1. `npm install --save-dev --save-exact @electron/packager@<version>` (this also updates `package-lock.json`)
 2. `npm run package`
-3. Start the printed `Nuke-Uninstaller.exe`, open Settings, check it says Standard mode, close it.
+3. Start the printed `Nuke System Cleaner.exe`, open Settings, check it says Standard mode, close it.
 
 ### Putting the packaged build under Program Files
 
@@ -123,10 +123,10 @@ Administrator mode is only offered for a packaged copy whose program file is und
 "Administrator mode is only offered for a copy installed in C:\Program Files". These steps are **untested** (the packaged
 build has not been made yet):
 
-1. `npm run package` builds under `%LOCALAPPDATA%\Programs\Nuke-Uninstaller\<version>`.
-2. In an **elevated** PowerShell (Run as administrator), copy that folder to `C:\Program Files\Nuke-Uninstaller\<version>`,
-   for example `Copy-Item -Recurse "$env:LOCALAPPDATA\Programs\Nuke-Uninstaller\<version>" "C:\Program Files\Nuke-Uninstaller\<version>"`.
-3. Start `C:\Program Files\Nuke-Uninstaller\<version>\Nuke-Uninstaller.exe`. Open Settings: the Relaunch button should be
+1. `npm run package` builds under `%LOCALAPPDATA%\Programs\Nuke System Cleaner\<version>`.
+2. In an **elevated** PowerShell (Run as administrator), copy that folder to `C:\Program Files\Nuke System Cleaner\<version>`,
+   for example `Copy-Item -Recurse "$env:LOCALAPPDATA\Programs\Nuke System Cleaner\<version>" "C:\Program Files\Nuke System Cleaner\<version>"`.
+3. Start `C:\Program Files\Nuke System Cleaner\<version>\Nuke System Cleaner.exe`. Open Settings: the Relaunch button should be
    there. The copy under `%LOCALAPPDATA%` can then be removed by hand.
 
 ## Safety model
@@ -207,7 +207,9 @@ fixture); they are not part of the packaged app and are listed in the same test.
 
 ## Where it stores data
 
-Everything is under `%LOCALAPPDATA%\Nuke-Uninstaller\`: `settings.json` (the restore-point switch, the "simple confirm screen" switch and the list of excluded folders), `run\` (the one-run
+Before the rename to Nuke - System Cleaner the folder was `%LOCALAPPDATA%\Nuke-Uninstaller\`. On start, if the new folder has no `settings.json` and the old one has a plain `settings.json`, the two switches and the excluded-folder list are read through the same strict loader and the sanitised result is saved into the new folder (`migrateLegacySettings` in `app/main/appdata.mjs`). `run\`, `electron\` and logs are never copied, the old folder is never changed or deleted, and any oddity means nothing is migrated and startup continues. The old folder can be deleted by hand.
+
+Everything is under `%LOCALAPPDATA%\Nuke System Cleaner\`: `settings.json` (the restore-point switch, the "simple confirm screen" switch and the list of excluded folders), `run\` (the one-run
 lock, the frozen `selection.json` and the audit log: paths and sizes, never file contents) and `electron\` (Electron's own profile data). No network access, no telemetry, no accounts, no API keys.
 
 ## Electron hardening (summary)
@@ -262,9 +264,9 @@ Until (a) or (b) is done, use standard mode only.
 ## Residual risks and known limits
 
 * **The run and restore folders are user-writable (R43), in standard mode too.** The restore step (which asks for
-  administrator approval even in standard mode) and every run use `%LOCALAPPDATA%\Nuke-Uninstaller\run` and `restore`.
+  administrator approval even in standard mode) and every run use `%LOCALAPPDATA%\Nuke System Cleaner\run` and `restore`.
   During an administrator run the app still writes its lock file, the
-  frozen selection, the audit log and the restore folder under `%LOCALAPPDATA%\Nuke-Uninstaller\`, which any program
+  frozen selection, the audit log and the restore folder under `%LOCALAPPDATA%\Nuke System Cleaner\`, which any program
   running as you can write to. A program running as you could try to redirect those writes with a junction. A real fix
   needs an administrator-only folder and was not done in this version. Administrator mode is opt-in; if that risk is not
   acceptable, do not use it.

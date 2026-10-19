@@ -9,7 +9,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
-import { appDataPaths, ensureAppData, buildProtection } from "./appdata.mjs";
+import { appDataPaths, ensureAppData, migrateLegacySettings, buildProtection } from "./appdata.mjs";
 import { windowOptions, viewOptions, hardenContents, hardenSession, MAIN_MINIMUM } from "./windows.mjs";
 import { createViewHost } from "./embedded-view.mjs";
 import { createQuestionBroker } from "./question.mjs";
@@ -26,22 +26,23 @@ const UI_DIR = path.resolve(here, "..", "renderer");
 const PRELOAD = path.resolve(here, "..", "preload", "preload.cjs");
 const isUiUrl = url => typeof url === "string" && url.startsWith("app://ui/");
 const RITUAL_URL_RE = /^http:\/\/127\.0\.0\.1:(\d{1,5})\/\?t=[0-9a-f]{64}$/;
-const FATAL_TEXT = "Nuke-Uninstaller could not start. Nothing was changed. Please close it and try again.";
-const INTERNAL_TEXT = "Nuke-Uninstaller hit an internal error and will close. Please start it again.";
+const FATAL_TEXT = "Nuke - System Cleaner could not start. Nothing was changed. Please close it and try again.";
+const INTERNAL_TEXT = "Nuke - System Cleaner hit an internal error and will close. Please start it again.";
 const PERMANENT_WARNING = "Deleting is permanent: these items do not go to the Recycle Bin. A system restore point protects Windows settings and installed programs, but it does NOT bring back your own files (documents, pictures and so on).";
 
 let paths;
 try {
   paths = appDataPaths(process.env);
   ensureAppData(paths);
+  migrateLegacySettings(paths); // one time, never throws
 } catch {
   // Fixed text only (the error text can hold paths); the user sees why nothing opened, then the app ends.
-  try { dialog.showErrorBox("Nuke-Uninstaller", FATAL_TEXT); } catch { /* no UI */ }
+  try { dialog.showErrorBox("Nuke - System Cleaner", FATAL_TEXT); } catch { /* no UI */ }
   app.exit(1);
 }
 
 if (paths) {
-  // Everything Electron writes (cache, storage) lives under %LOCALAPPDATA%\Nuke-Uninstaller\electron.
+  // Everything Electron writes (cache, storage) lives under %LOCALAPPDATA%\Nuke System Cleaner\electron.
   app.setPath("userData", paths.electronDir);
   app.enableSandbox();
   protocol.registerSchemesAsPrivileged([{ scheme: "app", privileges: { standard: true, secure: true } }]);
@@ -157,15 +158,15 @@ function start() {
   const relaunchElevated = makeRelaunchElevated({ app, execPath: process.execPath });
 
   // Main-process errors can carry the ritual url (and its token) in their text: never print them, never show them.
-  process.on("unhandledRejection", () => { console.error("Nuke-Uninstaller: an internal step failed."); });
+  process.on("unhandledRejection", () => { console.error("Nuke - System Cleaner: an internal step failed."); });
   // An internal error outside a delete tells the user (fixed text) and quits; while a delete is in the "deleting" state the app
   // stays up so the run can finish and be reported.
   process.on("uncaughtException", () => {
-    console.error("Nuke-Uninstaller: an internal error occurred.");
+    console.error("Nuke - System Cleaner: an internal error occurred.");
     let deleting = false;
     try { deleting = !!controller && controller.isDeleting() === true; } catch { deleting = false; }
     if (deleting) return;
-    try { dialog.showErrorBox("Nuke-Uninstaller", INTERNAL_TEXT); } catch { /* no UI */ }
+    try { dialog.showErrorBox("Nuke - System Cleaner", INTERNAL_TEXT); } catch { /* no UI */ }
     app.quit();
   });
 
@@ -205,7 +206,7 @@ function start() {
     mainWindow.once("ready-to-show", () => mainWindow && mainWindow.show());
     mainWindow.loadURL("app://ui/index.html").catch(() => {});
   } catch {
-    try { dialog.showErrorBox("Nuke-Uninstaller", FATAL_TEXT); } catch { /* no UI */ }
+    try { dialog.showErrorBox("Nuke - System Cleaner", FATAL_TEXT); } catch { /* no UI */ }
     app.quit();
   } });
 }

@@ -1,6 +1,6 @@
 # Third-party notices
 
-Nuke-Uninstaller itself is free for noncommercial use under the PolyForm Noncommercial License 1.0.0 (see `LICENSE`); it may not be sold. The items below keep their own licenses and copyrights. This file is generated from `app/renderer/credits.js`, the data behind the in-app **Credits and licenses** screen.
+Nuke - System Cleaner itself is free for noncommercial use under the PolyForm Noncommercial License 1.0.0 (see `LICENSE`); it may not be sold. The items below keep their own licenses and copyrights. This file is generated from `app/renderer/credits.js`, the data behind the in-app **Credits and licenses** screen.
 
 ## Included in the program
 

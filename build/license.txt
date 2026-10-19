@@ -1,11 +1,11 @@
-NUKE-UNINSTALLER - PLEASE READ BEFORE INSTALLING
+NUKE - SYSTEM CLEANER - PLEASE READ BEFORE INSTALLING
 
 1. LICENSE (what you may do)
-Nuke-Uninstaller is free for noncommercial use. You may use it, copy it and share it, and change it, as long as you keep its license with it. You may not sell it, charge for it, or use it as part of a business.
+Nuke - System Cleaner is free for noncommercial use. You may use it, copy it and share it, and change it, as long as you keep its license with it. You may not sell it, charge for it, or use it as part of a business.
 The full legal text is the PolyForm Noncommercial License 1.0.0. It is installed with the program (the file LICENSE inside the program's resources\app folder) and is also at https://polyformproject.org/licenses/noncommercial/1.0.0
 
 2. DISCLAIMER
-1) Nuke-Uninstaller is provided "as is", without any warranty. It is a free hobby project and you use it at your own risk.
+1) Nuke - System Cleaner is provided "as is", without any warranty. It is a free hobby project and you use it at your own risk.
 2) It deletes files permanently. Deleted items do not go to the Recycle Bin. A Windows restore point can bring back Windows settings and installed programs, but it cannot bring back your personal files. Back up anything important before you use this program.
 3) Uninstalling a program or removing a Windows app can stop other software that depends on it from working. Read each confirmation before you continue.
 4) I AM NOT LIABLE. To the fullest extent the law allows, the author is not liable for any loss or damage of any kind that results from using, or from not being able to use, this program. That includes lost or deleted files, lost data, damaged or unbootable systems, lost settings, lost programs, and lost time or money. It makes no difference whether the damage is direct or indirect, whether it comes from a mistake in the program, or whether the author was told it might happen. By using the program you accept this and agree not to hold the author responsible.
@@ -14,6 +14,6 @@ The full legal text is the PolyForm Noncommercial License 1.0.0. It is installed
 If you do not agree with this, click Cancel.
 
 3. THIRD-PARTY SOFTWARE
-Nuke-Uninstaller includes open-source software (Electron, Chromium, Node.js, three.js and others) and sound effects released into the public domain. Each keeps its own license. The list, with copyright lines and license texts, is in the file THIRD_PARTY_NOTICES.md and on the "Credits and licenses" screen inside the program.
+Nuke - System Cleaner includes open-source software (Electron, Chromium, Node.js, three.js and others) and sound effects released into the public domain. Each keeps its own license. The list, with copyright lines and license texts, is in the file THIRD_PARTY_NOTICES.md and on the "Credits and licenses" screen inside the program.
 
 Click "I Agree" to continue.

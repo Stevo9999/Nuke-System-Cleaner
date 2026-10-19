@@ -1,5 +1,5 @@
 // fixture/make-app-fixture.mjs <dir> [sid]
-// Builds a fake per-user profile for the Nuke-Uninstaller flow tests and the manual rehearsal:
+// Builds a fake per-user profile for the Nuke - System Cleaner flow tests and the manual rehearsal:
 //   <dir>\Local       (stands in for %LOCALAPPDATA%)   Temp junk, CrashDumps, a per-user program FakeApp and its leftovers
 //   <dir>\Roaming     (stands in for %APPDATA%)        FakeApp leftovers, a shared publisher folder, a Start Menu shortcut
 //   <dir>\victim      the target of a junction placed inside Local\Temp (must always survive)

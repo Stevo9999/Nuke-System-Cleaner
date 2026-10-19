@@ -521,7 +521,7 @@ export function createController({
       const excludedNow = exclusionMatcher(excl, { deep: true });
       await chunked(chosen, i => { if (excludedNow(i.path)) throw new Error("excluded"); });
       const map = {
-        sessionId: "nuke-uninstaller",
+        sessionId: "nuke-system-cleaner",
         items: result.items.map(i => ({ id: i.id, group: i.group, path: i.path, sharedWith: Array.isArray(i.sharedWith) ? i.sharedWith : [] })),
         allowedRoots: Array.isArray(result.allowedRoots) ? result.allowedRoots : [],
         protectedPaths: [...protectedFor(request), ...excl, ...(Array.isArray(result.protectedPaths) ? result.protectedPaths : [])],
@@ -561,7 +561,7 @@ export function createController({
   // Closing the confirm window before the press is a decision worth keeping a record of (no token, no url).
   function auditCancelled(run) {
     try {
-      const rec = { at: new Date().toISOString(), sessionId: "nuke-uninstaller", ...(typeof run.sha256 === "string" ? { sha256: run.sha256 } : {}), runId: run.runId, state: "cancelled" };
+      const rec = { at: new Date().toISOString(), sessionId: "nuke-system-cleaner", ...(typeof run.sha256 === "string" ? { sha256: run.sha256 } : {}), runId: run.runId, state: "cancelled" };
       fs.appendFileSync(path.join(paths.runDir, "nuke-audit.log"), JSON.stringify(rec) + "\n");
     } catch { /* best effort */ }
   }

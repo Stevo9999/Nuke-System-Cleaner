@@ -1,5 +1,5 @@
-appId: local.nuke-uninstaller
-productName: Nuke-Uninstaller
+appId: local.nuke-system-cleaner
+productName: Nuke System Cleaner
 asar: false
 directories:
   output: release
@@ -26,7 +26,7 @@ win:
       arch: x64
   requestedExecutionLevel: asInvoker
 portable:
-  artifactName: Nuke-Uninstaller-Portable.exe
+  artifactName: Nuke System Cleaner - Portable.exe
 nsis:
   oneClick: false
   perMachine: true
@@ -37,4 +37,6 @@ nsis:
   runAfterFinish: true
   deleteAppDataOnUninstall: false
   license: build/license.txt
-  artifactName: Install-Nuke-Uninstaller.exe
+  include: build/installer.nsh
+  uninstallDisplayName: Nuke System Cleaner
+  artifactName: Nuke System Cleaner - Installer.exe

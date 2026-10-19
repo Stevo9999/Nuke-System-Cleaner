@@ -1,4 +1,4 @@
-# Nuke-Uninstaller
+# Nuke - System Cleaner
 
 A Windows program that helps you **remove programs and the junk they leave behind**, with safety checks and a deliberately dramatic confirmation (a 3D key, a glass cover and a big red button) so nothing is deleted by accident.
 
@@ -10,7 +10,7 @@ It runs as a normal user, needs no account and no internet connection, and sends
 
 ## About this application
 
-This application is a basic file cleaner, but thrown together by AI with visual stimulation.
+Nuke - System Cleaner is a basic file cleaner, but thrown together by AI with visual stimulation.
 
 It was written with the help of an AI coding assistant (Claude) and checked by an automated test suite and hand-testing on a real Windows 11 PC. It is a hobby project: treat it like any free tool from the internet and read the [disclaimer](#disclaimer) first.
 
@@ -43,14 +43,14 @@ What one early reviewer said about it:
 
 On the **Releases** page of this repository you can download either of these single files, or the zip that holds both plus the documents:
 
-* `Install-Nuke-Uninstaller.exe` (about 97 MB): the setup wizard, a single file.
-* `Nuke-Uninstaller-Portable.exe` (about 97 MB): the no-install program, a single file.
-* `Nuke-Uninstaller-<version>-windows-x64.zip`: both of the above plus the license, notices and a short read-me.
+* `Nuke System Cleaner - Installer.exe` (about 97 MB): the setup wizard, a single file.
+* `Nuke System Cleaner - Portable.exe` (about 97 MB): the no-install program, a single file.
+* `Nuke-System-Cleaner-<version>-windows-x64.zip`: both of the above plus the license, notices and a short read-me.
 
 If you took the zip, unzip it and then either:
 
-* **Install:** double-click **`Install-Nuke-Uninstaller.exe`** (or `Install.bat`). A setup wizard opens: read and accept the terms, choose the install folder (the default is `C:\Program Files\Nuke-Uninstaller`), click Install. It adds desktop and Start-menu shortcuts and offers to start the program. Windows asks for permission once. To remove it later use Windows Settings > Apps > Installed apps. The optional administrator mode is only offered when it is installed under `C:\Program Files`.
-* **No install:** double-click **`Nuke-Uninstaller-Portable.exe`**. It is completely standalone: it needs no installer, no other file and no install step, and runs from anywhere, including a USB drive. Administrator mode is not available from this version.
+* **Install:** double-click **`Nuke System Cleaner - Installer.exe`** (or `Install.bat`). A setup wizard opens: read and accept the terms, choose the install folder (the default is `C:\Program Files\Nuke System Cleaner`), click Install. It adds desktop and Start-menu shortcuts and offers to start the program. Windows asks for permission once. To remove it later use Windows Settings > Apps > Installed apps. The optional administrator mode is only offered when it is installed under `C:\Program Files`.
+* **No install:** double-click **`Nuke System Cleaner - Portable.exe`**. It is completely standalone: it needs no installer, no other file and no install step, and runs from anywhere, including a USB drive. Administrator mode is not available from this version.
 
 Requirements: Windows 10 or 11, 64-bit. It was developed and tested on Windows 11.
 
@@ -72,7 +72,7 @@ The programs are **not code-signed** (a signing certificate costs money), so Win
 * **Nothing is deleted until the last button.** Scans only read.
 * **Fixed places only.** Smart Scan looks in a short fixed list of junk locations. Windows itself (`C:\Windows`, `Program Files`, `ProgramData\Microsoft`), other accounts, and account secrets (saved-password and key folders, `.ssh`, `.gnupg`, `NTUSER.DAT`) are on a built-in never-touch list and are refused even if something offers them. You can add your own never-touch folders in Settings.
 * **Your own files are protected.** Desktop, Documents, Pictures, Music, Videos, Downloads and OneDrive are never offered.
-* **One narrow delete path.** The delete step re-checks every item again, refuses anything that changed since the scan, and writes an audit line to `%LOCALAPPDATA%\Nuke-Uninstaller` before and after.
+* **One narrow delete path.** The delete step re-checks every item again, refuses anything that changed since the scan, and writes an audit line to `%LOCALAPPDATA%\Nuke System Cleaner` before and after.
 * **The registry is not changed by this version.** Registry entries are listed for information only.
 * **No network.** The program makes no internet connections; the confirmation page is served only to this app on your own computer, once, with a random token.
 * **Normal user rights.** Administrator mode is optional and limited to a few Windows junk folders (temporary files, error reports, Windows Update downloads). It is only offered from the installed copy under `C:\Program Files`.
@@ -91,7 +91,7 @@ More detail for technical readers: [docs/TECHNICAL.md](docs/TECHNICAL.md) and [d
 **Please read this before you delete anything.**
 
 <!-- disclaimer:start -->
-* Nuke-Uninstaller is provided "as is", without any warranty. It is a free hobby project and you use it at your own risk.
+* Nuke - System Cleaner is provided "as is", without any warranty. It is a free hobby project and you use it at your own risk.
 * It deletes files permanently. Deleted items do not go to the Recycle Bin. A Windows restore point can bring back Windows settings and installed programs, but it cannot bring back your personal files. Back up anything important before you use this program.
 * Uninstalling a program or removing a Windows app can stop other software that depends on it from working. Read each confirmation before you continue.
 * I AM NOT LIABLE. To the fullest extent the law allows, the author is not liable for any loss or damage of any kind that results from using, or from not being able to use, this program. That includes lost or deleted files, lost data, damaged or unbootable systems, lost settings, lost programs, and lost time or money. It makes no difference whether the damage is direct or indirect, whether it comes from a mistake in the program, or whether the author was told it might happen. By using the program you accept this and agree not to hold the author responsible.
@@ -103,7 +103,7 @@ If you do not agree with this, please do not use the program.
 
 ## License
 
-Nuke-Uninstaller is free to use, copy and share for **noncommercial** purposes under the **PolyForm Noncommercial License 1.0.0** ([LICENSE](LICENSE), also at <https://polyformproject.org/licenses/noncommercial/1.0.0>). In plain words:
+Nuke - System Cleaner is free to use, copy and share for **noncommercial** purposes under the **PolyForm Noncommercial License 1.0.0** ([LICENSE](LICENSE), also at <https://polyformproject.org/licenses/noncommercial/1.0.0>). In plain words:
 
 * You may use it for yourself, at home, for hobby, study or research, and for charities, schools and similar organizations.
 * You may share it and change it, as long as you keep the license (and its "Required Notice" line) with it.
@@ -119,8 +119,8 @@ It includes or builds with third-party software that keeps **its own** license (
 **You do not need this to use the program** (see Download above). This is only for people who want to read, change or rebuild the code. It needs Windows, Node.js 22 or newer and git, and it downloads the build tools and Electron from the internet.
 
 ```powershell
-git clone https://github.com/Stevo9999/Nuke-Uninstaller.git
-cd Nuke-Uninstaller
+git clone https://github.com/Stevo9999/Nuke-System-Cleaner.git
+cd Nuke-System-Cleaner
 npm ci                    # installs the build tools
 node node_modules/electron/install.js   # downloads the Electron program (newer npm versions skip this step)
 npm start                 # run the app from source

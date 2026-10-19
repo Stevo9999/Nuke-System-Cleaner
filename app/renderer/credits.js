@@ -47,4 +47,4 @@ export const CREDITS = Object.freeze([
 ]);
 
 export const TRADEMARKS = "Windows, Microsoft Store, Microsoft Edge, Chrome, Firefox, Brave, Opera and other product names are trademarks of their owners. They are used only to say what this app works with. This app is independent and is not affiliated with or endorsed by any of them.";
-export const GENERAL_NOTE = "Nuke-Uninstaller itself is free for noncommercial use under the PolyForm Noncommercial License 1.0.0 (see the LICENSE file); it may not be sold. The programs and sounds listed here keep their own licenses and copyrights. Each license text below (or the link beside it) belongs to its author.";
+export const GENERAL_NOTE = "Nuke - System Cleaner itself is free for noncommercial use under the PolyForm Noncommercial License 1.0.0 (see the LICENSE file); it may not be sold. The programs and sounds listed here keep their own licenses and copyrights. Each license text below (or the link beside it) belongs to its author.";

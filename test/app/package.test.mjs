@@ -9,8 +9,8 @@ import { appProtectedPaths, appProtectedRoots, violatesRoots } from "../../app/m
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "pk-"));
 const rd = (rel) => fs.readFileSync(new URL("../../" + rel, import.meta.url), "utf8");
 
-test("packageTarget: <LOCALAPPDATA>\\Programs\\Nuke-Uninstaller\\<version>", () => {
-  assert.equal(packageTarget({ LOCALAPPDATA: "C:\\Users\\Me\\AppData\\Local" }, "1.2.3"), "C:\\Users\\Me\\AppData\\Local\\Programs\\Nuke-Uninstaller\\1.2.3");
+test("packageTarget: <LOCALAPPDATA>\\Programs\\Nuke System Cleaner\\<version>", () => {
+  assert.equal(packageTarget({ LOCALAPPDATA: "C:\\Users\\Me\\AppData\\Local" }, "1.2.3"), "C:\\Users\\Me\\AppData\\Local\\Programs\\Nuke System Cleaner\\1.2.3");
 });
 
 test("packageTarget: bad versions and bad LOCALAPPDATA throw", () => {
@@ -25,11 +25,11 @@ test("packageTarget rejects '..' segments in LOCALAPPDATA", () => {
   for (const l of ["C:\\Users\\Me\\..\\Other", "C:\\..", "C:\\a/../b"]) assert.throws(() => packageTarget({ LOCALAPPDATA: l }, "1.2.3"), TypeError, l);
 });
 
-test("run: an existing dist\\Nuke-Uninstaller-win32-x64 gives a clear error before packaging and is left alone", async () => {
+test("run: an existing dist\\Nuke System Cleaner-win32-x64 gives a clear error before packaging and is left alone", async () => {
   const root = tmp(), local = tmp();
   try {
     fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({ name: "x", version: "1.0.0" }));
-    const stale = path.join(root, "dist", "Nuke-Uninstaller-win32-x64");
+    const stale = path.join(root, "dist", "Nuke System Cleaner-win32-x64");
     fs.mkdirSync(stale, { recursive: true }); fs.writeFileSync(path.join(stale, "old.txt"), "old");
     await assert.rejects(run({ root, env: { LOCALAPPDATA: local }, loadPackager: async () => async () => assert.fail("must not package") }), /build folder already exists.*never deletes/);
     assert.equal(fs.readFileSync(path.join(stale, "old.txt"), "utf8"), "old");
@@ -52,23 +52,23 @@ test("run: lazy packager, asar false / win32 / x64 / out dist, copies to the tar
   try {
     fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({ name: "x", version: "2.3.4" }));
     const calls = [];
-    const built = path.join(root, "dist", "Nuke-Uninstaller-win32-x64");
+    const built = path.join(root, "dist", "Nuke System Cleaner-win32-x64");
     const fakePackager = async (opts) => {
       calls.push(opts);
       fs.mkdirSync(path.join(built, "resources", "app"), { recursive: true });
-      fs.writeFileSync(path.join(built, "Nuke-Uninstaller.exe"), "exe");
+      fs.writeFileSync(path.join(built, "Nuke System Cleaner.exe"), "exe");
       fs.writeFileSync(path.join(built, "resources", "app", "a.txt"), "a");
       return [built];
     };
     const r = await run({ root, env: { LOCALAPPDATA: local }, loadPackager: async () => fakePackager, log: (s) => logs.push(s) });
-    assert.equal(r.target, path.win32.join(local, "Programs", "Nuke-Uninstaller", "2.3.4"));
+    assert.equal(r.target, path.win32.join(local, "Programs", "Nuke System Cleaner", "2.3.4"));
     assert.equal(calls.length, 1);
     const o = calls[0];
-    assert.equal(o.asar, false); assert.equal(o.platform, "win32"); assert.equal(o.arch, "x64"); assert.equal(o.name, "Nuke-Uninstaller");
+    assert.equal(o.asar, false); assert.equal(o.platform, "win32"); assert.equal(o.arch, "x64"); assert.equal(o.name, "Nuke System Cleaner");
     assert.equal(o.dir, root); assert.equal(o.out, path.join(root, "dist"));
     assert.deepEqual(o.ignore, [...PACKAGER_IGNORE]);
     assert.equal(fs.readFileSync(path.join(r.target, "resources", "app", "a.txt"), "utf8"), "a");
-    assert.equal(r.exe, path.win32.join(r.target, "Nuke-Uninstaller.exe"));
+    assert.equal(r.exe, path.win32.join(r.target, "Nuke System Cleaner.exe"));
     assert.ok(logs.some((l) => l.includes(r.exe)));
     // second run: refused before the packager is even loaded; existing files untouched
     fs.writeFileSync(path.join(r.target, "keep.txt"), "keep");
@@ -113,8 +113,8 @@ test("package.json: script 'package' present, no unlocked packager dependency, v
 });
 
 test("packaged mode protects the exe folder and the data root", () => {
-  const exeDir = "C:\\Users\\Me\\AppData\\Local\\Programs\\Nuke-Uninstaller\\0.1.0\\resources\\app";
-  const dataRoot = "C:\\Users\\Me\\AppData\\Local\\Nuke-Uninstaller";
+  const exeDir = "C:\\Users\\Me\\AppData\\Local\\Programs\\Nuke System Cleaner\\0.1.0\\resources\\app";
+  const dataRoot = "C:\\Users\\Me\\AppData\\Local\\Nuke System Cleaner";
   const home = "C:\\Users\\Me";
   const list = appProtectedPaths({ appDir: exeDir, dataRoot, home, env: {} }).map((p) => p.toLowerCase());
   assert.ok(list.includes(exeDir.toLowerCase()));

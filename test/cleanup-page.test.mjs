@@ -192,7 +192,7 @@ test("accessibility and honesty notes are present; the verdict depends on result
   // The page runs both in the app (closing the page cancels) and from the /nuke command (it does not): it claims neither.
   assert.ok(!/Closing this page (does not )?cancel/.test(script), "no claim about what closing the page does");
   assert.ok(!/Run \/nuke/.test(src), "no /nuke instruction on the page");
-  assert.match(src, /<title>Nuke-Uninstaller<\/title>/);
+  assert.match(src, /<title>Nuke - System Cleaner<\/title>/);
   assert.ok(script.includes("else if (r.status === 'deleted') kind = 'deleted'") && script.includes("const anyDeleted = rows.some(x => x.kind === 'deleted')"));
   assert.ok(/anyDeleted \? 'DETONATED' : 'NOTHING DELETED'/.test(script));
   assert.equal([...script.matchAll(/DETONATED/g)].length, 1, "the word appears in one results-dependent place only");

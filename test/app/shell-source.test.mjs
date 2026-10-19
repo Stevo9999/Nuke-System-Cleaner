@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const rd = rel => fs.readFileSync(fileURLToPath(new URL("../../" + rel, import.meta.url)), "utf8");
 
-test("main.mjs: userData moved under LOCALAPPDATA\\Nuke-Uninstaller, single-instance, no menu, web-contents-created hardening", () => {
+test("main.mjs: userData moved under LOCALAPPDATA\\Nuke System Cleaner, single-instance, no menu, web-contents-created hardening", () => {
   const s = rd("app/main/main.mjs");
   assert.match(s, /app\.setPath\(\s*["']userData["']\s*,\s*paths\.electronDir\s*\)/);
   assert.ok(s.search(/setPath\(\s*"userData"/) < s.indexOf("whenReady"), "setPath before ready");
@@ -36,8 +36,8 @@ test("renderer placeholder and preload have no unsafe sinks", () => {
 
 test("package.json: electron pinned exactly (no ^ or ~), main is app/main/main.mjs, test script unchanged, lockfile present", () => {
   const pkg = JSON.parse(rd("package.json"));
-  assert.equal(pkg.name, "nuke-uninstaller");
-  assert.equal(pkg.productName, "Nuke-Uninstaller");
+  assert.equal(pkg.name, "nuke-system-cleaner");
+  assert.equal(pkg.productName, "Nuke System Cleaner");
   assert.equal(pkg.main, "app/main/main.mjs");
   assert.equal(pkg.scripts.start, "electron .");
   assert.equal(pkg.scripts.test, "node --test --test-concurrency=1");
@@ -97,9 +97,9 @@ test("Fix round 1 main.mjs: every loadURL has a silent catch; ritual load failur
   assert.equal(caught.length, all.length, "every loadURL ends in .catch(() => {})");
   assert.match(ev, /on\("did-fail-load"/);
   for (const bad of [/console\./, /validatedURL/, /console-message/, /\binnerHTML\b/, /child_process/]) assert.ok(!bad.test(ev), "embedded-view must not contain " + bad);
-  assert.match(s, /dialog\.showErrorBox\(\s*"Nuke-Uninstaller"\s*,\s*FATAL_TEXT\s*\)/);
+  assert.match(s, /dialog\.showErrorBox\(\s*"Nuke - System Cleaner"\s*,\s*FATAL_TEXT\s*\)/);
   assert.match(s, /process\.on\("unhandledRejection"/);
   assert.match(s, /process\.on\("uncaughtException"/);
-  for (const m of s.matchAll(/console\.(log|error|warn|info)\(([^;]*)/g)) assert.match(m[2], /^"Nuke-Uninstaller cannot start: " \+ \(e && e\.message\)\)$|^"[^"]*"\)$/, "console call prints fixed text only: " + m[0]);
+  for (const m of s.matchAll(/console\.(log|error|warn|info)\(([^;]*)/g)) assert.match(m[2], /^"Nuke - System Cleaner cannot start: " \+ \(e && e\.message\)\)$|^"[^"]*"\)$/, "console call prints fixed text only: " + m[0]);
   assert.ok(!/console-message/.test(s) && !/validatedURL/.test(s), "no handler reads or prints load urls or ritual console text");
 });

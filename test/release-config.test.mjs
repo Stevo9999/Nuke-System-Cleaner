@@ -12,10 +12,10 @@ const norm = s => s.replace(/\r\n/g, "\n");
 
 test("electron-builder artifact names match the zip script, Install.bat, README and the read-me", () => {
   const yml = read("electron-builder.yml");
-  const portable = /portable:\s*\n\s*artifactName:\s*(\S+)/.exec(yml)[1];
-  const setup = /nsis:[\s\S]*?artifactName:\s*(\S+)/.exec(yml)[1];
-  assert.equal(portable, "Nuke-Uninstaller-Portable.exe");
-  assert.equal(setup, "Install-Nuke-Uninstaller.exe");
+  const portable = /portable:\s*\n\s*artifactName:\s*(.+?)[ \t]*\r?\n/.exec(yml)[1];
+  const setup = /nsis:[\s\S]*?artifactName:\s*(.+?)[ \t]*(\r?\n|$)/.exec(yml)[1];
+  assert.equal(portable, "Nuke System Cleaner - Portable.exe");
+  assert.equal(setup, "Nuke System Cleaner - Installer.exe");
   assert.ok(!/\$\{version\}/.test(portable + setup), "fixed names: docs and scripts refer to them literally");
   const zip = read("scripts/make-release-zip.ps1");
   for (const n of [portable, setup]) {
@@ -26,6 +26,22 @@ test("electron-builder artifact names match the zip script, Install.bat, README 
   assert.ok(read("scripts/release-extras/Install.bat").includes(setup));
   assert.match(yml, /license:\s*build\/license\.txt/);
   assert.match(yml, /allowToChangeInstallationDirectory:\s*true/);
+});
+
+test("naming: product/file names, ids, wizard captions and the uninstall entry name", () => {
+  const yml = read("electron-builder.yml");
+  assert.match(yml, /^appId: local\.nuke-system-cleaner$/m);
+  assert.match(yml, /^productName: Nuke System Cleaner$/m);
+  assert.match(yml, /include:\s*build\/installer\.nsh/);
+  assert.match(yml, /uninstallDisplayName:\s*Nuke System Cleaner$/m);
+  const nsh = read("build/installer.nsh");
+  assert.match(nsh, /!macro customHeader/);
+  assert.match(nsh, /^\s*Caption "Nuke System Cleaner - Installer"$/m);
+  assert.match(nsh, /^\s*UninstallCaption "Nuke System Cleaner - Uninstaller"$/m);
+  const pkg = JSON.parse(read("package.json"));
+  assert.equal(pkg.name, "nuke-system-cleaner");
+  assert.match(read("scripts/make-release-zip.ps1"), /Nuke-System-Cleaner-\$v-windows-x64\.zip/);
+  for (const f of ["README.md", "package.json", "scripts/release-extras/READ-ME-FIRST.txt"]) assert.ok(read(f).includes("https://github.com/Stevo9999/Nuke-System-Cleaner"), f);
 });
 
 test("the disclaimer in README, READ-ME-FIRST and the installer terms is generated from docs/disclaimer.txt (no drift)", () => {

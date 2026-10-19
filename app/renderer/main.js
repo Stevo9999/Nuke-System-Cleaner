@@ -88,7 +88,7 @@ export function createApp(doc, nuke, mount = mountDetective) {
 
   // Home
   const home = make("section", "screen");
-  home.appendChild(make("h1", "title", "Nuke-Uninstaller"));
+  home.appendChild(make("h1", "title", "Nuke - System Cleaner"));
   home.appendChild(make("p", "lead", "Find leftovers and clear them out safely."));
   home.appendChild(noticeEl());
   const homeError = alertLine();
@@ -676,7 +676,7 @@ export function bootstrap(doc, nuke) {
     const host = doc.getElementById("app");
     const p = doc.createElement("p");
     p.setAttribute("role", "alert");
-    p.textContent = "The app bridge is unavailable, so this window cannot work. Please restart Nuke-Uninstaller.";
+    p.textContent = "The app bridge is unavailable, so this window cannot work. Please restart Nuke - System Cleaner.";
     host.appendChild(p);
     return null;
   }

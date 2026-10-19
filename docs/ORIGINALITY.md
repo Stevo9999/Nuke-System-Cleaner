@@ -1,6 +1,6 @@
 # Originality policy
 
-Nuke-Uninstaller is its own program. This page says how we keep it that way and how a reader can check.
+Nuke - System Cleaner is its own program, built from scratch for this project. This page says how we keep it that way and how a reader can check.
 
 ## What "not copying" means here
 - **Code:** every line outside `vendor/` and `node_modules/` was written for this project. Third-party code is used only under an open license and is listed with its license on the in-app Credits page. We do not use code from products whose terms forbid copying (for example a project that only allows personal use is credited as an idea source, nothing more).

@@ -213,12 +213,12 @@ test("inventory: README names every spawned exe and its file, with its exact arg
 test("README: run, safety model, spawns, restore point honesty, administrator mode, icacls, residual risks, tests command", () => {
   const t = README.toLowerCase().replace(/\s+/g, " ");
   const need = [
-    "npm start", "nuke-uninstaller.exe", "%localappdata%\\programs\\nuke-uninstaller", "npm run package", "@electron/packager",
+    "npm start", "nuke system cleaner.exe", "%localappdata%\\programs\\nuke system cleaner", "npm run package", "@electron/packager",
     "safety model", "exclusive", "shared", "protected", "report-only", "only high is pre-ticked", "lib/junk-locations.mjs",
     "does **not** protect personal files", "needs administrator approval", "24 hours",
     "administrator mode limits", "c:\\windows\\temp", "c:\\windows\\minidump", "reportarchive", "reportqueue", "no service is stopped",
     "if the app cannot tell whether it is running as administrator, deleting is turned off", "per-user files are report-only while elevated",
-    "%localappdata%\\nuke-uninstaller\\", "contextisolation", "sandbox", "content security policy",
+    "%localappdata%\\nuke system cleaner\\", "contextisolation", "sandbox", "content security policy",
     "node --test --test-concurrency=1", "icacls", "authenticated users", "c:\\program files",
     "user-writable", "different administrator account", "other than `c:`", "been exercised", "rehearsal",
     "zero vulnerabilities", "registry cleaning is phase 2",

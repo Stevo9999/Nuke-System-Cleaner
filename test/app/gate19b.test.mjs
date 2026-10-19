@@ -121,11 +121,11 @@ test("one window (Task 20): only the main window kind exists; the ritual/results
 // ---- item 4 (R46)
 const fakeApp = (packaged = true) => {
   const log = [];
-  return { log, isPackaged: packaged, getAppPath: () => "C:\\Program Files\\Nuke-Uninstaller\\1.0\\resources\\app", releaseSingleInstanceLock: () => log.push("release"),
+  return { log, isPackaged: packaged, getAppPath: () => "C:\\Program Files\\Nuke System Cleaner\\1.0\\resources\\app", releaseSingleInstanceLock: () => log.push("release"),
     requestSingleInstanceLock: () => { log.push("request"); return true; }, quit: () => log.push("quit") };
 };
 test("R46: relaunch allowed only for a packaged app exe under C:\\Program Files or (x86)", async () => {
-  const good = ["C:\\Program Files\\Nuke-Uninstaller\\1.0\\Nuke-Uninstaller.exe", "c:\\program files (x86)\\N\\n.exe", "C:\\PROGRAM FILES\\N\\n.exe"];
+  const good = ["C:\\Program Files\\Nuke System Cleaner\\1.0\\Nuke System Cleaner.exe", "c:\\program files (x86)\\N\\n.exe", "C:\\PROGRAM FILES\\N\\n.exe"];
   const bad = ["E:\\Claude\\nuke\\node_modules\\electron\\dist\\electron.exe", "C:\\Users\\me\\AppData\\Local\\Programs\\N\\n.exe", "C:\\Program Files Evil\\n.exe",
     "C:\\Program Files\\..\\Users\\me\\n.exe", "C:\\Program Files", "C:\\Program Files\\", "D:\\Program Files\\n.exe", "\\\\h\\C$\\Program Files\\n.exe",
     "C:\\Program Files\\a\\..\\..\\Users\\n.exe", "C:\\Program Files/N/n.exe", "", null, undefined, 5, "C:\\Program Files\\n\u0000.exe"];
@@ -153,7 +153,7 @@ test("README: npm ci first (Electron download), Program Files copy steps marked 
   const t = read("docs/TECHNICAL.md").replace(/\s+/g, " ");
   assert.ok(t.indexOf("npm ci") > -1 && t.indexOf("npm ci") < t.indexOf("npm start"));
   assert.match(t, /about 100 MB/);
-  assert.match(t, /C:\\Program Files\\Nuke-Uninstaller\\<version>/);
+  assert.match(t, /C:\\Program Files\\Nuke System Cleaner\\<version>/);
   assert.match(t, /elevated/i);
   assert.match(t, /untested/i);
   assert.match(t, /Pick a folder to investigate/);

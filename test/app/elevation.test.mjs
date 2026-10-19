@@ -19,7 +19,7 @@ import { scanArgs } from "../../app/main/scan-runner.mjs";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SID = "S-1-5-21-11-22-33-1001";
 const PS = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
-const EXE = "C:\\Users\\me\\AppData\\Local\\Programs\\Nuke-Uninstaller\\Nuke-Uninstaller.exe";
+const EXE = "C:\\Users\\me\\AppData\\Local\\Programs\\Nuke System Cleaner\\Nuke System Cleaner.exe";
 
 // A spawn stand-in: records the call and ends the child with `code` (or an 'error' event) on the next tick.
 function fakeSpawn({ code = 0, error = false, throws = false } = {}) {
@@ -48,7 +48,7 @@ test("relaunchAsAdmin: full-path powershell, -EncodedCommand, -Verb RunAs, quote
   assert.equal(args.length, 4);
   assert.equal(opts.shell, false);
   const script = decode(args[3]);
-  assert.match(script, /Start-Process -FilePath 'C:\\Users\\me\\AppData\\Local\\Programs\\Nuke-Uninstaller\\Nuke-Uninstaller\.exe'/);
+  assert.match(script, /Start-Process -FilePath 'C:\\Users\\me\\AppData\\Local\\Programs\\Nuke System Cleaner\\Nuke System Cleaner\.exe'/);
   assert.match(script, /-Verb RunAs/);
   // each argument is a single-quoted literal (quote doubled) wrapping a double-quoted path, so spaces survive
   assert.ok(script.includes(`-ArgumentList '"E:\\My Apps\\it''s nuke"'`), script);
@@ -334,7 +334,7 @@ function fakeApp({ packaged = false, relock = true } = {}) {
 }
 test("relaunch wiring: lock released before the relaunch, quit on started, lock taken back otherwise", async () => {
   // R46: only a packaged app under C:\Program Files can relaunch elevated, so the wiring is exercised with such a path.
-  const EXE = "C:\\Program Files\\Nuke-Uninstaller\\1.0\\Nuke-Uninstaller.exe";
+  const EXE = "C:\\Program Files\\Nuke System Cleaner\\1.0\\Nuke System Cleaner.exe";
   for (const [out, packaged, want, wantArgs] of [
     ["started", true, ["release", "relaunch", "quit"], []],
     ["cancelled", true, ["release", "relaunch", "request"], []],

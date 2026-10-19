@@ -10,11 +10,11 @@ import { TOOL_PROTECTED } from "../../scan.mjs";
 const mk = () => fs.mkdtempSync(path.join(os.tmpdir(), "nuke-appdata-"));
 const rm = d => fs.rmSync(d, { recursive: true, force: true });
 
-test("paths live under LOCALAPPDATA\\Nuke-Uninstaller; bad LOCALAPPDATA values throw", () => {
+test("paths live under LOCALAPPDATA\\Nuke System Cleaner; bad LOCALAPPDATA values throw", () => {
   const la = mk();
   try {
     const p = appDataPaths({ LOCALAPPDATA: la });
-    const root = path.join(la, "Nuke-Uninstaller");
+    const root = path.join(la, "Nuke System Cleaner");
     assert.deepEqual(p, { root, settingsFile: path.join(root, "settings.json"), runDir: path.join(root, "run"),
       restoreDir: path.join(root, "restore"), electronDir: path.join(root, "electron") });
     for (const bad of ["", "rel", "..\\x", "\\\\host\\s", "\\\\?\\C:\\x", "C:\\", "C:\\a\\..\\b", "a\0b", undefined, 5, "C:\\x:ads"])
@@ -40,7 +40,7 @@ test("ensureAppData creates folders and refuses a linked root", () => {
     assert.throws(() => ensureAppData(p2));
     assert.deepEqual(fs.readdirSync(victim), []);
   } finally {
-    try { fs.unlinkSync(la2 + "\\Nuke-Uninstaller"); } catch { try { fs.rmdirSync(la2 + "\\Nuke-Uninstaller"); } catch { /* none */ } }
+    try { fs.unlinkSync(la2 + "\\Nuke System Cleaner"); } catch { try { fs.rmdirSync(la2 + "\\Nuke System Cleaner"); } catch { /* none */ } }
     rm(la); rm(la2); rm(victim);
   }
 });
@@ -96,7 +96,7 @@ test("saveSettings round-trips and rejects anything but {restorePoint:boolean, p
 
 test("subtree list holds app dir, data root, tool files and user folders; exact-roots list holds home, APPDATA, LOCALAPPDATA, Start Menu", () => {
   const home = "C:\\Users\\Tester", appData = "C:\\Users\\Tester\\AppData\\Roaming", la = "C:\\Users\\Tester\\AppData\\Local";
-  const appDir = la + "\\Programs\\Nuke-Uninstaller\\1.0.0", dataRoot = la + "\\Nuke-Uninstaller";
+  const appDir = la + "\\Programs\\Nuke System Cleaner\\1.0.0", dataRoot = la + "\\Nuke System Cleaner";
   const l = appProtectedPaths({ appDir, dataRoot, home, env: {} });
   const has = (list, p) => list.some(x => x.toLowerCase() === p.toLowerCase());
   for (const p of [appDir, dataRoot, ...["Desktop", "Documents", "Pictures", "Music", "Videos", "Downloads", "OneDrive"].map(n => home + "\\" + n), ...TOOL_PROTECTED])
@@ -200,7 +200,7 @@ test("checkPath refuses LOCALAPPDATA itself and the data root, accepts a temp fi
     fs.writeFileSync(tmpFile, "x");
     const vendor = path.join(la, "Vendor", "cache");
     fs.mkdirSync(vendor, { recursive: true });
-    const appDir = path.join(la, "Programs", "Nuke-Uninstaller", "1.0.0");
+    const appDir = path.join(la, "Programs", "Nuke System Cleaner", "1.0.0");
     fs.mkdirSync(appDir, { recursive: true });
     fs.writeFileSync(path.join(appDir, "x"), "x");
     const home = path.join(la, "fakehome");

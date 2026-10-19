@@ -1,7 +1,7 @@
 // app/main/windows.mjs
 // Window options and hardening for webContents/sessions. Pure (no electron import) so it is unit-testable display-less.
 const KINDS = {
-  main: { width: 1100, height: 760, minWidth: 720, minHeight: 520, title: "Nuke-Uninstaller" },
+  main: { width: 1100, height: 760, minWidth: 720, minHeight: 520, title: "Nuke - System Cleaner" },
 };
 export const MAIN_MINIMUM = Object.freeze({ width: KINDS.main.minWidth, height: KINDS.main.minHeight });
 

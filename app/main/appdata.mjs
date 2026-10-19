@@ -1,5 +1,5 @@
-﻿// app/main/appdata.mjs
-// Per-user data folder (%LOCALAPPDATA%\Nuke-Uninstaller), settings, and the app's protected-path list.
+// app/main/appdata.mjs
+// Per-user data folder (%LOCALAPPDATA%\Nuke System Cleaner), settings, and the app's protected-path list.
 // No process spawns, no network. The environment is injected so tests never touch the real folders.
 import fs from "node:fs";
 import os from "node:os";
@@ -8,7 +8,7 @@ import crypto from "node:crypto";
 import { dirArgProblem, canonicalForms, within, suspiciousPathForm } from "../../lib/safepath.mjs";
 import { TOOL_PROTECTED } from "../../scan.mjs";
 
-const FOLDER = "Nuke-Uninstaller";
+const FOLDER = "Nuke System Cleaner";
 const MAX_SETTINGS_BYTES = 64 * 1024;
 
 export function appDataPaths(env = process.env) {
@@ -90,6 +90,33 @@ function writeSettingsFile(file, obj) {
     try { fs.rmSync(tmp, { force: true }); } catch { /* best effort */ }
     throw e;
   }
+}
+
+// ---- One-time migration from the old folder name ----
+// Before the rename the data lived in %LOCALAPPDATA%\Nuke System Cleaner. When the new folder has no settings.json and the old
+// folder has a plain settings.json, its two switches and never-touch list are read through the strict loaders above and the
+// SANITISED result is written into the new folder. Never copied: run\, electron\, logs. The old folder is never changed or
+// deleted. Any oddity (links, odd/oversized/corrupt file, no permission) means "do nothing"; this never throws.
+export const LEGACY_FOLDER = "Nuke-Uninstaller";
+export function migrateLegacySettings(paths) {
+  try {
+    if (!paths || typeof paths.root !== "string" || typeof paths.settingsFile !== "string") return { migrated: false, reason: "bad paths" };
+    try { fs.lstatSync(paths.settingsFile); return { migrated: false, reason: "new settings exist" }; } catch (e) { if (!e || e.code !== "ENOENT") return { migrated: false, reason: "new settings unreadable" }; }
+    const legacyRoot = path.join(path.dirname(paths.root), LEGACY_FOLDER);
+    const legacyFile = path.join(legacyRoot, "settings.json");
+    for (const p of [legacyRoot, legacyFile]) {
+      let st;
+      try { st = fs.lstatSync(p); } catch { return { migrated: false, reason: "no old settings" }; }
+      if (st.isSymbolicLink()) return { migrated: false, reason: "old settings are a link" };
+    }
+    const st = fs.statSync(legacyFile);
+    if (!st.isFile() || st.size > MAX_SETTINGS_BYTES) return { migrated: false, reason: "old settings not usable" };
+    const ex = readExclusions(legacyFile);
+    if (!ex.ok) return { migrated: false, reason: "old settings not readable" }; // unknown never-touch list: fail closed, start fresh
+    const s = loadSettings(legacyFile);
+    writeSettingsFile(paths.settingsFile, { restorePoint: s.restorePoint, plainConfirm: s.plainConfirm, ...(ex.list.length > 0 ? { exclusions: ex.list } : {}) });
+    return { migrated: true };
+  } catch { return { migrated: false, reason: "error" }; }
 }
 
 // ---- Exclusions: folders this app must never touch (the user's own never-touch list). Stored in settings.json as "exclusions". ----

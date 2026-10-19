@@ -131,7 +131,7 @@ test("19C: restore inner script exit codes with stubbed cmdlets (PowerShell only
   if (!fs.existsSync(ps)) return;
   const runId = "0123456789abcdef";
   const { inner } = restoreScripts({ runId, psExe: ps });
-  const desc = "Nuke-Uninstaller " + runId;
+  const desc = "Nuke System Cleaner " + runId;
   const stub = (check, points) => [
     "$script:made = $false",
     "function Get-ComputerRestorePoint { [CmdletBinding()] param() " + points + " }",
