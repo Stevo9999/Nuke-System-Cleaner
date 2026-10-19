@@ -1,4 +1,4 @@
-// Part of the spawn inventory: the exact PowerShell script texts that travel inside -EncodedCommand are pinned, so a change that
+﻿// Part of the spawn inventory: the exact PowerShell script texts that travel inside -EncodedCommand are pinned, so a change that
 // makes them start another program (or anything new) fails here and has to be reviewed.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -7,6 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { restoreScripts } from "../lib/restore.mjs";
+import { uninstallScript } from "../lib/uninstall-run.mjs";
 import { relaunchScript } from "../app/main/elevation.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -23,10 +24,12 @@ const PINNED = {
   restoreInner: "79a7863d049adb9f0911af1c5680389c6009d611d658297f44919e2636975a51",
   restoreOuter: "95ea77d1bc982eb16d4e1cc02fdf78217c0363342bdae94a29de691e66186204",
   relaunch: "2c9af1f474d2377920bbef62415ff60ebf9ca8666c104b4029e9b44dcf5de278",
+  uninstall: "93a94ad4097078c2b43e9044e02ba23a7ca3e1dcefdc41114df49549cf8ce7da",
+  uninstallArgs: "eeb20c5d616e35fd925ff0e372822e448ca2c5e0f4b9a36cf91d668c9f3a3846",
 };
 
 test("each spawn call is a literal options object (no spread) with shell: false", () => {
-  for (const f of ["run.mjs", "lib/sysread.mjs", "lib/restore.mjs", "app/main/elevation.mjs"]) {
+  for (const f of ["run.mjs", "lib/sysread.mjs", "lib/restore.mjs", "lib/uninstall-run.mjs", "app/main/elevation.mjs"]) {
     const calls = code(f).split("\n").filter((l) => l.includes("spawnFn(") && l.includes("shell: false"));
     assert.equal(calls.length, 1, f);
     assert.ok(!/\.\.\./.test(calls[0].replace("...k.args", "")), f + ": no spread in the spawn call");
@@ -49,6 +52,17 @@ test("restore scripts start exactly one program (the elevated powershell.exe -En
   assert.ok(!/WriteAllText|Out-File|Set-Content|ConvertTo-Json|\.json|Get-Content/i.test(inner + outer.replace(payload, "")));
   assert.equal(sha(inner), PINNED.restoreInner);
   assert.equal(sha(outer), PINNED.restoreOuter);
+});
+
+test("the uninstall script starts exactly one program (the confirmed uninstaller, no -Verb) and exits with its code", () => {
+  const s = uninstallScript("C:\\Program Files (x86)\\WinDirStat\\Uninstall.exe", "/S");
+  assert.equal((s.match(/Start-Process/g) || []).length, 1);
+  assert.ok(s.includes("Start-Process -FilePath 'C:\\Program Files (x86)\\WinDirStat\\Uninstall.exe' -ArgumentList '/S' -Wait -PassThru"));
+  assert.ok(s.includes("exit [int]$p.ExitCode") && s.endsWith("catch { exit 9009 }"));
+  assert.ok(!/-Verb|RunAs/.test(s));
+  assert.ok(!FORBIDDEN_PS.test(s));
+  assert.equal(sha(uninstallScript("C:\\a\\u.exe", "")), PINNED.uninstall);
+  assert.equal(sha(uninstallScript("C:\\a\\u.exe", "/S")), PINNED.uninstallArgs);
 });
 
 test("the relaunch script starts exactly one program, the app itself, with -Verb RunAs", () => {

@@ -145,6 +145,8 @@ test("inventory: every exe is a fixed C:\\Windows\\System32 path: no environment
     assert.match(code(f), /systemRoot = "C:\\\\Windows"/, f);
     assert.match(code(f), /const psExe = systemRoot \+ "\\\\System32\\\\WindowsPowerShell\\\\v1\.0\\\\powershell\.exe";/, f);
   }
+  assert.match(code("lib/uninstall-run.mjs"), /systemRoot = "C:\\\\Windows"/);
+  assert.match(code("lib/uninstall-run.mjs"), /const psExe = systemRoot \+ "\\\\System32\\\\WindowsPowerShell\\\\v1\.0\\\\powershell\.exe";/);
   assert.match(code("lib/winapps.mjs"), /systemRoot = "C:\\\\Windows"/);
   assert.match(code("lib/winapps.mjs"), /const exe = systemRoot \+ "\\\\System32\\\\WindowsPowerShell\\\\v1\.0\\\\powershell\.exe";/);
   assert.match(code("run.mjs"), /systemRoot = "C:\\\\Windows"/);
@@ -164,7 +166,7 @@ test("inventory: the exact programs and argument lists", () => {
   assert.ok(sys.includes('runTool("whoami.exe", ["/groups", "/fo", "csv", "/nh"], opts)'));
   assert.ok(sys.includes("spawnFn(exe, args, { shell: false"));
   assert.ok(code("lib/winapps.mjs").includes('spawnFn(exe, ["-NoProfile", "-NonInteractive", "-EncodedCommand", encodeCommand(script)], { shell: false'));
-  assert.ok(code("lib/uninstall-run.mjs").includes("spawnFn(exe, args ? [args] : [], { shell: false"));
+  assert.ok(code("lib/uninstall-run.mjs").includes('spawnFn(psExe, ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded], { shell: false'));
   assert.ok(code("lib/wintools.mjs").includes("spawnFn(LAUNCHER, launchArgs(key), { shell: false, detached: true, stdio: \"ignore\" })"));
   assert.ok(code("lib/wintools.mjs").includes('const LAUNCHER = S + "rundll32.exe";') && code("lib/wintools.mjs").includes('const S = "C:\\\\Windows\\\\System32\\\\";'));
   assert.ok(code("lib/wintools.mjs").includes('["shell32.dll,ShellExec_RunDLL", WINTOOLS[key].exe, ...WINTOOLS[key].args]'));
@@ -185,7 +187,7 @@ const README = read("docs/TECHNICAL.md");
 const SPAWN_TABLE = [
   ["rundll32.exe", "run.mjs"], ["reg.exe", "lib/sysread.mjs"], ["schtasks.exe", "lib/sysread.mjs"], ["whoami.exe", "lib/sysread.mjs"],
   ["powershell.exe", "lib/restore.mjs"], ["powershell.exe", "app/main/elevation.mjs"], ["powershell.exe", "lib/winapps.mjs"],
-  ["the selected program's own uninstaller", "lib/uninstall-run.mjs"],
+  ["powershell.exe", "lib/uninstall-run.mjs"],
   ["rundll32.exe", "lib/wintools.mjs"],
 ];
 

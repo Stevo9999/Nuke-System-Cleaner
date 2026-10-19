@@ -87,18 +87,48 @@ test("winapps: list output is parsed and filtered through the same strict patter
   assert.deepEqual(r.apps.map(a => a.fullName), [good]);
 });
 
-test("runUninstaller: refuses relative/odd input before anything starts; passes arguments through verbatim", async () => {
-  let started = 0;
-  const spawnFn = (exe, args, o) => { started++; spawnFn.last = { exe, args, o }; const c = { once: (e, cb) => { if (e === "exit") setImmediate(() => cb(0)); }, kill() {} }; return c; };
-  for (const bad of [{ exe: "unins.exe", args: "" }, { exe: "C:\\a\\u.txt", args: "" }, { exe: "C:\\a\\u.exe", args: "x\u0000" }, { exe: "C:\\a/u.exe", args: "" }])
-    assert.equal((await runUninstaller({ ...bad, spawnFn, exists: () => true })).ok, false);
+const PS_EXE = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
+const decodeScript = a => Buffer.from(a[3], "base64").toString("utf16le");
+function fakeSpawn(exitCode) {
+  const spawnFn = (exe, args, o) => { spawnFn.started++; spawnFn.last = { exe, args, o }; return { once: (e, cb) => { if (e === "exit") setImmediate(() => cb(exitCode)); }, kill() { spawnFn.killed++; }, unref() { spawnFn.unref++; } }; };
+  spawnFn.started = 0; spawnFn.killed = 0; spawnFn.unref = 0;
+  return spawnFn;
+}
+
+test("runUninstaller: refuses relative/odd/wildcard input before anything starts; starts powershell.exe with the literal-quoted program and arguments", async () => {
+  const spawnFn = fakeSpawn(0);
+  for (const bad of [{ exe: "unins.exe", args: "" }, { exe: "C:\\a\\u.txt", args: "" }, { exe: "C:\\a\\u.exe", args: "x\u0000" }, { exe: "C:\\a/u.exe", args: "" },
+    { exe: "C:\\a[1]\\u.exe", args: "" }, { exe: "C:\\a*\\u.exe", args: "" }, { exe: "C:\\a?\\u.exe", args: "" }, { exe: "C:\\a`b\\u.exe", args: "" }, { exe: "C:\\a\u0001\\u.exe", args: "" }])
+    assert.equal((await runUninstaller({ ...bad, spawnFn, exists: () => true })).ok, false, JSON.stringify(bad));
   assert.equal((await runUninstaller({ exe: "C:\\a\\u.exe", args: "", spawnFn, exists: () => false })).ok, false);
-  assert.equal(started, 0);
-  const r = await runUninstaller({ exe: "C:\\a\\u.exe", args: "/S /v\"/qn\"", spawnFn, exists: () => true });
+  assert.equal(spawnFn.started, 0);
+  const r = await runUninstaller({ exe: "C:\\Program Files (x86)\\WinDirStat\\Uninstall.exe", args: "/S /v\"/qn\" it's", spawnFn, exists: () => true });
   assert.deepEqual(r, { ok: true, code: 0 });
+  assert.equal(spawnFn.started, 1);
+  assert.equal(spawnFn.last.exe, PS_EXE);
+  assert.deepEqual(spawnFn.last.args.slice(0, 3), ["-NoProfile", "-NonInteractive", "-EncodedCommand"]);
+  assert.equal(spawnFn.last.args.length, 4);
   assert.equal(spawnFn.last.o.shell, false);
-  assert.equal(spawnFn.last.o.windowsVerbatimArguments, true);
-  assert.deepEqual(spawnFn.last.args, ['/S /v"/qn"']);
+  const script = decodeScript(spawnFn.last.args);
+  assert.equal(script, "$ErrorActionPreference='Stop'; try { $p = Start-Process -FilePath 'C:\\Program Files (x86)\\WinDirStat\\Uninstall.exe' -ArgumentList '/S /v\"/qn\" it''s' -Wait -PassThru; exit [int]$p.ExitCode } catch { exit 9009 }");
+  assert.ok(!/-Verb/.test(script));
+  // no arguments: no -ArgumentList at all
+  await runUninstaller({ exe: "C:\\a\\u.exe", args: "", spawnFn, exists: () => true });
+  assert.equal(decodeScript(spawnFn.last.args), "$ErrorActionPreference='Stop'; try { $p = Start-Process -FilePath 'C:\\a\\u.exe' -Wait -PassThru; exit [int]$p.ExitCode } catch { exit 9009 }");
+});
+
+test("runUninstaller: the uninstaller's own exit code is reported (3010/1641 = restart needed); 9009 means it could not be started; 1 is a real code", async () => {
+  for (const code of [0, 1, 3010, 1641, 5])
+    assert.deepEqual(await runUninstaller({ exe: "C:\\a\\u.exe", args: "", spawnFn: fakeSpawn(code), exists: () => true }), { ok: true, code });
+  assert.deepEqual(await runUninstaller({ exe: "C:\\a\\u.exe", args: "", spawnFn: fakeSpawn(9009), exists: () => true }), { ok: false, reason: "could not start" });
+  assert.deepEqual(await runUninstaller({ exe: "C:\\a\\u.exe", args: "", spawnFn: fakeSpawn(null), exists: () => true }), { ok: true, code: null });
+  assert.deepEqual(await runUninstaller({ exe: "C:\\a\\u.exe", args: "", spawnFn: () => { throw new Error("x"); }, exists: () => true }), { ok: false, reason: "could not start" });
+});
+
+test("runUninstaller: timeout ends the waiting only (nothing is killed)", async () => {
+  const spawnFn = () => { spawnFn.killed = spawnFn.killed || 0; return { once() {}, kill() { spawnFn.killed++; }, unref() {} }; };
+  assert.deepEqual(await runUninstaller({ exe: "C:\\a\\u.exe", args: "", spawnFn, exists: () => true, timeoutMs: 20 }), { ok: false, reason: "timeout" });
+  assert.equal(spawnFn.killed, 0);
 });
 
 test("IPC: the four new channels exist; ids must be 16 hex, nothing else is accepted", () => {
