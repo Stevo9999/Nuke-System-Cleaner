@@ -45,3 +45,11 @@ test("Install.bat tells the user when setup was cancelled instead of claiming su
   assert.match(bat, /if errorlevel 1/);
   assert.ok(bat.indexOf("if errorlevel 1") < bat.indexOf("Finished."));
 });
+
+test("the app icon exists as a real PNG (at least 256 px, as electron-builder needs) with its SVG source, and the build config points at it", () => {
+  const png = fs.readFileSync(path.join(ROOT, "build/icon.png"));
+  assert.equal(png.subarray(0, 8).toString("hex"), "89504e470d0a1a0a", "PNG signature");
+  assert.ok(png.readUInt32BE(16) >= 256 && png.readUInt32BE(20) >= 256, "at least 256x256");
+  assert.match(read("build/icon.svg"), /<svg[^>]*viewBox="0 0 512 512"/);
+  assert.match(read("electron-builder.yml"), /icon:\s*build\/icon\.png/);
+});

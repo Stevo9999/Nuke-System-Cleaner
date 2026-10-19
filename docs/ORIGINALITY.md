@@ -4,7 +4,7 @@ Nuke-Uninstaller is its own program. This page says how we keep it that way and 
 
 ## What "not copying" means here
 - **Code:** every line outside `vendor/` and `node_modules/` was written for this project. Third-party code is used only under an open license and is listed with its license on the in-app Credits page. We do not use code from products whose terms forbid copying (for example a project that only allows personal use is credited as an idea source, nothing more).
-- **Words, labels, icons, layout:** all screen text, button names and descriptions are our own wording. No icon, picture, sound or font comes from another cleaner. The sounds are CC0; the 3D scene is built with three.js; the app icon is the stock Electron one until we make our own.
+- **Words, labels, icons, layout:** all screen text, button names and descriptions are our own wording. No icon, picture, sound or font comes from another cleaner. The sounds are CC0; the 3D scene is built with three.js; the app icon (`build/icon.svg`, rendered to `build/icon.png`) is our own drawing: a monitor with a mushroom cloud on its screen. It is not copied from or traced over any other icon, and it uses no trademarked shapes.
 - **Names:** we do not use another product's name or its feature names (`test/originality.test.mjs` fails the build if one appears in any tracked file).
 - **Ideas:** a program that lists installed software, runs its uninstaller and looks for leftovers is a normal kind of tool, and ideas and functions are free to use. What we must not do is copy the way someone else expressed them: their code, text, art or look.
 

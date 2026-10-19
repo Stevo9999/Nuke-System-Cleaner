@@ -18,6 +18,7 @@ files:
   - LICENSE
   - THIRD_PARTY_NOTICES.md
 win:
+  icon: build/icon.png
   target:
     - target: portable
       arch: x64

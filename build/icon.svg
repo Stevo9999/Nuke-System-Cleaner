@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2d3957"/><stop offset="1" stop-color="#171d2e"/></linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.78" r="0.7"><stop offset="0" stop-color="#ffb347" stop-opacity="0.55"/><stop offset="1" stop-color="#0f1420" stop-opacity="0"/></radialGradient>
+    <clipPath id="scr"><rect x="116" y="148" width="280" height="192" rx="12"/></clipPath>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="108" fill="url(#bg)"/>
+  <!-- monitor -->
+  <rect x="232" y="356" width="48" height="40" fill="#bfc8d8"/>
+  <rect x="180" y="390" width="152" height="22" rx="11" fill="#d5dce8"/>
+  <rect x="96" y="128" width="320" height="236" rx="28" fill="#eef2f8"/>
+  <rect x="116" y="148" width="280" height="192" rx="12" fill="#0f1420"/>
+  <rect x="116" y="148" width="280" height="192" rx="12" fill="url(#glow)"/>
+  <g clip-path="url(#scr)">
+    <!-- ground flash -->
+    <ellipse cx="256" cy="338" rx="120" ry="14" fill="#ffc83d" opacity="0.95"/>
+    <!-- mushroom cloud: stem, cap lobes, highlights -->
+    <path d="M232 340 C240 300 244 280 240 262 L272 262 C268 280 272 300 280 340 Z" fill="#e8442e"/>
+    <circle cx="198" cy="244" r="34" fill="#f25f2c"/>
+    <circle cx="314" cy="244" r="34" fill="#f25f2c"/>
+    <circle cx="228" cy="214" r="42" fill="#ff7a2f"/>
+    <circle cx="286" cy="212" r="44" fill="#ff7a2f"/>
+    <ellipse cx="256" cy="240" rx="82" ry="38" fill="#ff7a2f"/>
+    <ellipse cx="256" cy="262" rx="72" ry="16" fill="#e8442e"/>
+    <ellipse cx="256" cy="226" rx="46" ry="26" fill="#ffc83d"/>
+    <ellipse cx="248" cy="218" rx="22" ry="12" fill="#fff0a8"/>
+    <!-- cracked glass -->
+    <path d="M396 148 L372 188 L390 208 L360 246 L376 262" fill="none" stroke="#eef2f8" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
+    <path d="M116 300 L146 286 L138 262" fill="none" stroke="#eef2f8" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+  </g>
+  <!-- flying pieces and sparks -->
+  <polygon points="418,118 446,100 452,130" fill="#eef2f8"/>
+  <polygon points="76,176 100,160 104,190" fill="#bfc8d8"/>
+  <rect x="428" y="170" width="22" height="14" rx="3" transform="rotate(28 439 177)" fill="#d5dce8"/>
+  <rect x="62" y="236" width="18" height="12" rx="3" transform="rotate(-24 71 242)" fill="#eef2f8"/>
+  <circle cx="440" cy="236" r="8" fill="#ffc83d"/>
+  <circle cx="470" cy="150" r="5" fill="#ff7a2f"/>
+  <circle cx="64" cy="140" r="6" fill="#ffc83d"/>
+  <circle cx="92" cy="300" r="5" fill="#ff7a2f"/>
+  <circle cx="404" cy="92" r="5" fill="#ffc83d"/>
+</svg>
