@@ -171,7 +171,7 @@ test("controller: adminContents true only when identity.elevated === true; relau
       await c.delete({ ids: [a.id] });
       assert.equal(startRun.calls.length, 1, String(elevated));
       assert.equal(startRun.calls[0].opts.adminContents, want, String(elevated));
-      assert.deepEqual(Object.keys(startRun.calls[0].opts).sort(), ["adminContents", "plainConfirm", "runDir", "scanStartMs"]);
+      assert.deepEqual(Object.keys(startRun.calls[0].opts).sort(), ["adminContents", "onProgress", "plainConfirm", "runDir", "scanStartMs"]);
       assert.equal(restoreCalls[0].elevated, want); // restore step: no extra prompt when elevated
     }
     // the worker-side sanitiser keeps only a strict true

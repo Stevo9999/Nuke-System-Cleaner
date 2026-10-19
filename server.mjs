@@ -7,8 +7,9 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { checkPath, within } from "./lib/safepath.mjs";
-import { removeItem, adminProblem } from "./lib/delete.mjs";
-import { dirSize } from "./lib/sizes.mjs";
+import { removeItemAsync, adminProblem } from "./lib/delete.mjs";
+import { dirSizeAsync } from "./lib/sizes.mjs";
+import { yieldNow } from "./lib/cooperative.mjs";
 import { AGE_SKEW_MS } from "./lib/age.mjs";
 
 const WIN = process.platform === "win32";
@@ -101,7 +102,7 @@ const VENDOR_RE = /^\/vendor\/([A-Za-z0-9._-]{1,64})$/;
 // Trusted options (from run.mjs): expectedSha256 must match the selection bytes; allowedRoots,
 // protectedPaths and livePaths, when given, override the file (which then only supplies paths).
 export function createCleanupServer({ selectionFile, pageFile, soundsDir, vendorDir, minGapMs = 2000, ttlMs = 60000, afterDoneMs = 30000, auditFile,
-  expectedSha256, allowedRoots, protectedPaths, livePaths, adminContents = false, scanStartMs, ageCheckOffForTests = false, onClose } = {}) {
+  expectedSha256, allowedRoots, protectedPaths, livePaths, adminContents = false, scanStartMs, ageCheckOffForTests = false, onClose, onProgress: onProgressOpt } = {}) {
   // Phase 1b: trusted option only (from run.mjs), never read from selection.json or a request.
   if (typeof adminContents !== "boolean") throw new Error("bad option adminContents");
   // Release gate: trusted option only (from the app / run.mjs), never read from selection.json or a request. Entries changed after it are not deleted.
@@ -147,34 +148,54 @@ export function createCleanupServer({ selectionFile, pageFile, soundsDir, vendor
 
   // R3: every selected path goes through checkPath BEFORE dirSize. Refused paths are shown with
   // size 0, never sized, and never offered for deletion (even if they become valid later).
+  // This runs in prepare() (called by listen(), before the port is opened), in chunks: with thousands of items the Electron
+  // main process must keep answering its window. The checks per item are exactly the same as before.
   const shown = [], offered = new Set();
-  sel.paths.forEach((p, i) => {
-    let v = checkPath(p, check);
-    // R41 defence in depth: in administrator mode only a direct-child file of an administrator folder may be offered.
-    if (v.ok && check.adminContents) { let why; try { why = adminProblem(v, undefined, true); } catch { why = "administrator folders unresolved"; } if (why) v = { ok: false, reason: why }; }
-    if (v.ok) { offered.add(i); shown.push({ path: v.resolved, isDir: v.isDir, bytes: dirSize(v.resolved) }); }
-    else shown.push({ path: p, isDir: false, bytes: 0, refused: true, reason: v.reason });
-  });
-  // A duplicate entry, or an entry inside another offered folder, is shown with bytes 0 (coveredBy)
-  // so no total double-counts. Deletion handles it as "already gone" or deletes it first.
-  for (const i of offered) {
-    const me = shown[i];
-    const cover = [...offered].find(j => {
-      if (j === i || !within(me.path, shown[j].path)) return false;
-      const same = within(shown[j].path, me.path);
-      return same ? j < i : shown[j].isDir; // duplicate: earliest wins; nested: inside a selected folder
-    });
-    if (cover !== undefined) { me.bytes = 0; me.coveredBy = shown[cover].path; }
-  }
-  const totalBytes = shown.reduce((n, it) => n + it.bytes, 0);
-  deepFreeze(shown);
+  let totalBytes = 0, roots = [], drives0 = {}, prepared = false;
+  const onProgress = typeof onProgressOpt === "function" ? onProgressOpt : () => {};
   // statfs only local drive roots of accepted paths (never a UNC host: that would be a network request).
   const localRoot = r => (WIN ? /^[A-Za-z]:\\$/.test(r) : r === "/");
-  const roots = [...new Set(shown.filter((_, i) => offered.has(i)).map(it => path.parse(it.path).root))].filter(localRoot);
   const freeByDrive = () => Object.fromEntries(roots.map(r => {
     try { const s = fs.statfsSync(r); return [r, { total: s.blocks * s.bsize, free: s.bavail * s.bsize, ok: true }]; } catch { return [r, { total: 0, free: 0, ok: false }]; }
   }));
-  const drives0 = freeByDrive();
+  const keyOf = p => (WIN ? p.toLowerCase() : p);
+  async function prepare() {
+    for (let i = 0; i < sel.paths.length; i++) {
+      const p = sel.paths[i];
+      let v = checkPath(p, check);
+      // R41 defence in depth: in administrator mode only a direct-child file of an administrator folder may be offered.
+      if (v.ok && check.adminContents) { let why; try { why = adminProblem(v, undefined, true); } catch { why = "administrator folders unresolved"; } if (why) v = { ok: false, reason: why }; }
+      if (v.ok) { offered.add(i); shown.push({ path: v.resolved, isDir: v.isDir, bytes: await dirSizeAsync(v.resolved) }); }
+      else shown.push({ path: p, isDir: false, bytes: 0, refused: true, reason: v.reason });
+      if ((i + 1) % 50 === 0) { onProgress({ stage: "checking", done: i + 1, total: sel.paths.length }); await yieldNow(); }
+    }
+    // A duplicate entry, or an entry inside another offered folder, is shown with bytes 0 (coveredBy)
+    // so no total double-counts. Deletion handles it as "already gone" or deletes it first.
+    // Same rule as before (the lowest-numbered offered entry j that is the same path with j < i, or a selected folder
+    // that contains it), found through a lookup of the entry's own path and each parent path instead of comparing every pair.
+    const byPath = new Map();
+    for (const j of offered) { const k = keyOf(shown[j].path); if (byPath.has(k)) byPath.get(k).push(j); else byPath.set(k, [j]); }
+    let n = 0;
+    for (const i of offered) {
+      const me = shown[i];
+      let cover;
+      for (let cur = path.resolve(me.path); ; cur = path.dirname(cur)) {
+        for (const j of byPath.get(keyOf(cur)) || []) {
+          if (j === i) continue;
+          const same = keyOf(cur) === keyOf(path.resolve(me.path));
+          if (same ? j < i : shown[j].isDir) { if (cover === undefined || j < cover) cover = j; }
+        }
+        if (path.dirname(cur) === cur) break;
+      }
+      if (cover !== undefined) { me.bytes = 0; me.coveredBy = shown[cover].path; }
+      if (++n % 500 === 0) await yieldNow();
+    }
+    totalBytes = shown.reduce((s, it) => s + it.bytes, 0);
+    deepFreeze(shown);
+    roots = [...new Set(shown.filter((_, i) => offered.has(i)).map(it => path.parse(it.path).root))].filter(localRoot);
+    drives0 = freeByDrive();
+    prepared = true;
+  }
 
   let expiresAtMono = 0, state = "armed", unlockedAt = 0, port = 0, server, ttlTimer, doneTimer, closed = false, listening = false;
   const events = [], clients = new Set();
@@ -205,6 +226,7 @@ export function createCleanupServer({ selectionFile, pageFile, soundsDir, vendor
     } catch { return false; }
   }
 
+  let processed = 0; // items finished so far (for the app's "Deleting... n of N" line)
   async function runDeletion() {
     const before = freeByDrive();
     const results = new Array(sel.paths.length);
@@ -215,9 +237,10 @@ export function createCleanupServer({ selectionFile, pageFile, soundsDir, vendor
     const order = sel.paths.map((_, i) => i).sort((a, b) => depth(sel.paths[a]) - depth(sel.paths[b]) || a - b);
     for (const i of order) {
       const r = offered.has(i)
-        ? removeItem(sel.paths[i], check, notAfterMs === undefined ? {} : { notAfterMs })
+        ? await removeItemAsync(sel.paths[i], check, notAfterMs === undefined ? {} : { notAfterMs })
         : { path: shown[i].path, status: "skipped", reason: `refused at launch: ${shown[i].reason}`, bytes: 0 };
       results[i] = r; emit({ type: "item", ...r });
+      processed++;
       await new Promise(r2 => setImmediate(r2));
     }
     const after = freeByDrive();
@@ -356,9 +379,12 @@ export function createCleanupServer({ selectionFile, pageFile, soundsDir, vendor
 
   return {
     token, runId, getState: () => state, close,
-    listen() {
-      if (listening || closed) return Promise.reject(new Error("server is single-use"));
+    getProgress: () => ({ done: processed, total: sel.paths.length }),
+    async listen() {
+      if (listening || closed) throw new Error("server is single-use");
       listening = true;
+      await prepare();
+      if (closed) throw new Error("server is single-use");
       server = http.createServer({ requestTimeout: 10000, headersTimeout: 5000, keepAliveTimeout: 1000, maxHeaderSize: 8192, requireHostHeader: false /* our own check answers 403 */ }, (req, res) => {
         try { handle(req, res); } catch { send(res, 500, { error: "internal" }); }
       });

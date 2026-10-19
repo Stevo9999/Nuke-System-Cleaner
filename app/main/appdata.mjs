@@ -330,6 +330,22 @@ export async function buildProtection({ appDir, dataRoot, home = os.homedir(), e
   return { profileRoot, protectedPaths, protectedRoots, notes: [...kf.notes, ...extra.notes] };
 }
 
+// Same rule as violatesRoots, with the roots' canonical forms worked out ONCE (a delete of thousands of items would otherwise
+// resolve every root on disk again for every item). Returns a function path -> boolean. Fails closed: bad roots => always true.
+export function rootsViolationChecker(roots) {
+  let rs;
+  try {
+    if (!Array.isArray(roots) || roots.length === 0 || !roots.every(okAbs)) return () => true;
+    rs = roots.flatMap(canonicalForms);
+  } catch { return () => true; }
+  return candidate => {
+    try {
+      if (suspiciousPathForm(candidate)) return true;
+      return canonicalForms(candidate).some(c => rs.some(r => within(r, c)));
+    } catch { return true; }
+  };
+}
+
 // True if the candidate equals a root or is an ancestor of one; false for a path inside a root. Fails closed.
 export function violatesRoots(candidate, roots) {
   try {

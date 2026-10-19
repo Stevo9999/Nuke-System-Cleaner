@@ -136,7 +136,8 @@ test("e2e smart scan: only old, unlocked, link-free items deleted; young file, j
     assert.equal(last.deleted, tickedIds(view).length);
     assert.equal(typeof last.measured, "boolean");
     assert.match(last.detail, last.measured ? /Free space went up by/ : /could not be measured/);
-    assert.deepEqual(ui.phases.map(p => p.phase).filter((p, i, a) => a.indexOf(p) === i), ["scanning", "results", "ritual", "done"]);
+    // "checking" / "deleting" are live-count phases (whether "deleting" is seen depends on the poll timing), so they are left out here.
+    assert.deepEqual(ui.phases.map(p => p.phase).filter(p => p !== "checking" && p !== "deleting").filter((p, i, a) => a.indexOf(p) === i), ["scanning", "results", "ritual", "done"]);
     assert.equal(ui.closed, 1, "results window closed once the warning was accepted");
     await assert.rejects(controller.resultsGet(), /refused/, "the old result is gone after a run");
   } finally { s.cleanup(); }
