@@ -178,13 +178,13 @@ test("exit code -> outcome table; only the exact made code is made; 0, 1 and unk
       assert.match(r.message, /timed out/);
     } finally { t.mock.timers.reset(); }
   }
-  // default timeout is 600000 ms
+  // default timeout is 180000 ms (3 minutes)
   {
     try {
       t.mock.timers.enable({ apis: ["setTimeout"] });
       const spawnFn = fakeSpawn(null);
       const p = createRestorePoint(base(spawnFn, { elevated: true }));
-      t.mock.timers.tick(599999);
+      t.mock.timers.tick(179999);
       assert.equal(spawnFn.calls[0].child.killed, false);
       t.mock.timers.tick(1);
       assert.equal(spawnFn.calls[0].child.killed, true);

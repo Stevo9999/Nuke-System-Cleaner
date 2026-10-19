@@ -26,6 +26,7 @@ export const DESCRIPTIONS = Object.freeze({
   plainConfirm: "Off by default. When on, the final confirmation is a simple screen with an Unlock button and then a Delete permanently button. It is just as careful: the same steps and waiting time apply.",
   relaunch: "Restart with administrator rights to also clear a few Windows system folders. Only offered from a copy installed in C:\\Program Files.",
   cancelScan: "Stop the scan and go back.",
+  stopWaiting: "Stop waiting for Windows to make the restore point. You are then asked whether to continue without one; nothing is deleted unless you say yes.",
   back: "Return to the start screen.",
 });
 export const FOLDER_HINT = DESCRIPTIONS.investigateFolder;
@@ -171,6 +172,18 @@ export function createApp(doc, nuke, mount = mountDetective) {
     tick();
     restoreTimer = setInterval(tick, 1000);
   }
+  // "Stop waiting": ends the restore point step (same channel as the scan Cancel). The main process then asks whether to
+  // continue without a restore point (the default answer is Stop, nothing is deleted without a yes).
+  const stopWaitError = alertLine();
+  const stopWait = button("Stop waiting", async () => {
+    stopWaitError.hidden = true;
+    stopWait.disabled = true;
+    try { await nuke.cancelScan(); } catch (e) { if (!isAbort(e)) showMsg(stopWaitError, friendly(e)); stopWait.disabled = false; }
+  });
+  const stopWaitRow = act(stopWait, DESCRIPTIONS.stopWaiting);
+  stopWaitRow.hidden = true;
+  phaseScreen.appendChild(stopWaitRow);
+  phaseScreen.appendChild(stopWaitError);
   const phaseBack = button("Back", () => show("home"));
   const phaseBackRow = act(phaseBack, DESCRIPTIONS.back);
   phaseScreen.appendChild(phaseBackRow);
@@ -584,7 +597,7 @@ export function createApp(doc, nuke, mount = mountDetective) {
     ritualText.textContent = text;
     ritualText.setAttribute("title", text);
     show("ritual");
-    ritualCancel.hidden = mode !== "confirm";
+    ritualCancel.hidden = mode !== "confirm"; // "busy" (deleting) shows neither button
     ritualDone.hidden = mode !== "done";
     ritualDone.disabled = false;
   }
@@ -599,9 +612,15 @@ export function createApp(doc, nuke, mount = mountDetective) {
     // A finished run keeps its page (blast, disk map); the bar shows the outcome and the way back.
     if (phase === "done" && p && typeof p === "object" && p.keepView === true) { ritualMode("done", phaseText("done", detail)); return; }
     phaseLine.textContent = phaseText(phase, detail);
-    phaseBack.hidden = phase === "restore";
-    phaseBackRow.hidden = phase === "restore";
-    if (phase === "restore" && (!detail || detail === "")) startRestoreBar(); else stopRestoreBar();
+    // "deleting" keeps the confirmation page below the bar; only the live count changes (no Cancel once it started).
+    if (phase === "deleting") { ritualMode("busy", phaseText("deleting", detail)); return; }
+    phaseBack.hidden = phase === "restore" || phase === "checking";
+    phaseBackRow.hidden = phase === "restore" || phase === "checking";
+    const waiting = phase === "restore" && (!detail || detail === "");
+    stopWaitRow.hidden = !waiting;
+    stopWaitError.hidden = true;
+    stopWait.disabled = false;
+    if (waiting) startRestoreBar(); else stopRestoreBar();
     show("phase");
   }
   function onProgress(p) {

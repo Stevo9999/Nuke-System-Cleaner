@@ -300,7 +300,7 @@ test("adminContents follows identity.elevated === true (Phase 1b)", async () => 
     await c.delete({ ids: [a.id] });
     assert.equal(startRun.calls.length, 1);
     assert.equal(startRun.calls[0].opts.adminContents, true);
-    assert.deepEqual(Object.keys(startRun.calls[0].opts).sort(), ["adminContents", "plainConfirm", "runDir", "scanStartMs"]);
+    assert.deepEqual(Object.keys(startRun.calls[0].opts).sort(), ["adminContents", "onProgress", "plainConfirm", "runDir", "scanStartMs"]);
     assert.equal(startRun.calls[0].opts.runDir, t.paths.runDir);
     assert.equal(restoreCalls[0].elevated, true);
   } finally { t.cleanup(); }

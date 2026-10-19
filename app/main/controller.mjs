@@ -18,10 +18,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { loadSettings, saveSettings, appProtectedRoots, violatesRoots, readExclusions, saveExclusions, addExclusion, exclusionId, exclusionMatcher } from "./appdata.mjs";
+import { loadSettings, saveSettings, appProtectedRoots, rootsViolationChecker, readExclusions, saveExclusions, addExclusion, exclusionId, exclusionMatcher } from "./appdata.mjs";
 import { toView, diffScans, fmtBytes, displayText } from "./view-model.mjs";
-import { buildSelection, revalidate, startFrozenRun } from "../../run.mjs";
-import { createRestorePoint, RESTORE_MESSAGES, TIMEOUT_MESSAGE } from "../../lib/restore.mjs";
+import { buildSelection, revalidateAsync, startFrozenRun } from "../../run.mjs";
+import { yieldNow } from "../../lib/cooperative.mjs";
+import { createRestorePoint, RESTORE_MESSAGES, TIMEOUT_MESSAGE, STOPPED_MESSAGE } from "../../lib/restore.mjs";
 import { adminContentDirs, within } from "../../lib/safepath.mjs";
 import { isLocked as fileIsLocked } from "../../lib/smartscan.mjs";
 import { changedAfter } from "../../lib/age.mjs";
@@ -135,9 +136,8 @@ export function createController({
   // R36 + R41 (layer 2). Fails closed: an unreadable list refuses the item.
   //   standard mode: nothing under an administrator folder;
   //   administrator mode: ONLY files directly inside an administrator folder (no per-user items, no folders, no nesting).
-  function adminItemOk(it) {
-    let dirs;
-    try { dirs = adminDirs(); } catch { return false; }
+  // `dirs` = the administrator folders, read ONCE per operation by the caller (null when unreadable: fail closed).
+  function adminItemOk(it, dirs) {
     if (!Array.isArray(dirs) || !dirs.every(d => typeof d === "string" && path.isAbsolute(d))) return false;
     const under = dirs.some(d => within(it.path, d));
     if (!elevated) return !under;
@@ -155,10 +155,17 @@ export function createController({
   // Hard never-touch list (lib/never-touch.mjs): Windows folders, Program Files, other accounts, account secrets. Checked when a
   // selection is made and again on the frozen paths at delete time. Only the four administrator folders are let through, and
   // only in administrator mode (adminItemOk still limits those to direct-child files).
-  const neverTouch = p => {
-    let dirs = [];
-    try { dirs = elevated ? adminDirs() : []; } catch { return "unreadable"; }
-    return neverTouchPath(p, { profile: profileRoot, allowedAdminDirs: Array.isArray(dirs) ? dirs : [] });
+  // The checks that need the disk or the administrator folders are prepared once per operation (not once per item):
+  // thousands of items must not make the main process re-resolve the same roots thousands of times.
+  const readAdminDirs = () => { try { return adminDirs(); } catch { return null; } };
+  const guardsNow = () => {
+    const dirs = readAdminDirs();
+    const violates = rootsViolationChecker(protectedRoots);
+    const neverTouch = p => {
+      if (elevated && dirs === null) return "unreadable";
+      return neverTouchPath(p, { profile: profileRoot, allowedAdminDirs: elevated && Array.isArray(dirs) ? dirs : [] });
+    };
+    return { dirs, violates, neverTouch };
   };
   // The account SID is derived here from the identity read at startup; nothing from a renderer can set it.
   const sid = identity && typeof identity.sid === "string" && SID_USER.test(identity.sid) ? identity.sid : null;
@@ -168,6 +175,7 @@ export function createController({
   let appById = new Map();
   let busy = null;          // null | "scan" | "pick" | "delete"
   let scanAbort = null;     // AbortController of the running scan
+  let restoreAbort = null;  // AbortController of the running restore point step ("Stop waiting")
   let last = null;          // { request, result, diff, scanStartMs }
   let ritualCtx = null;     // { server, close } while the embedded confirmation page is up (for ritualCancel)
   let currentRun = null;    // the started run while a delete is in progress (for isDeleting)
@@ -251,10 +259,12 @@ export function createController({
   }
 
   // Re-checks the ids against the last scan. Returns the items to freeze, or throws "refused". Never touches the disk.
-  function choose(ids) {
+  // Reads no file content; it stats paths (canonical forms), so it hands the event loop back every 50 items.
+  async function choose(ids) {
     if (!last || !last.request || !Array.isArray(ids) || ids.length < 1 || ids.length > MAX_IDS) throw refused();
     let excluded;
     try { excluded = exclusionMatcher(exclusionsNow(), { deep: true }); } catch { throw refused(); }
+    const { dirs, violates, neverTouch } = guardsNow();
     const items = last.result.items;
     const byId = new Map();
     for (const it of items) {
@@ -265,11 +275,13 @@ export function createController({
     for (const id of ids) { if (typeof id !== "string" || !ID_RE.test(id)) throw refused(); want.add(id); }
     const ok = it => !!it && it.selectable === true && SELECTABLE_GROUPS.has(it.group) && CONFIDENCES.has(it.confidence) &&
       (it.kind === "file" || it.kind === "dir") && typeof it.path === "string" && path.isAbsolute(it.path) &&
-      Array.isArray(it.sharedWith) && !violatesRoots(it.path, protectedRoots) && adminItemOk(it) && profileOk(it) && !excluded(it.path) && !neverTouch(it.path);
+      Array.isArray(it.sharedWith) && !violates(it.path) && adminItemOk(it, dirs) && profileOk(it) && !excluded(it.path) && !neverTouch(it.path);
+    let n = 0;
     for (const id of want) {
       const it = byId.get(id);
       if (!ok(it)) throw refused();
       if (it.companionOf !== undefined && !want.has(it.companionOf)) throw refused(); // a companion only travels with its parent
+      if (++n % 50 === 0) await yieldNow();
     }
     // Companions of ticked items are added here (a Recycle Bin $I record goes with its $R data).
     for (const it of items) {
@@ -283,10 +295,17 @@ export function createController({
 
   async function restoreStep() {
     phase({ phase: "restore" });
+    // "Stop waiting" (nuke:scan:cancel -> scanCancel) aborts this controller: the restore helper kills its child on a best-effort
+    // basis, and the race below ends the step even if the helper itself never answers.
+    const ac = new AbortController();
+    restoreAbort = ac;
+    const stopped = new Promise(res => ac.signal.addEventListener("abort", () => res({ outcome: "failed", detail: "stopped" }), { once: true }));
     let r;
-    try { r = await restore({ runId: crypto.randomBytes(8).toString("hex"), elevated }); } catch { r = null; }
+    try { r = await Promise.race([restore({ runId: crypto.randomBytes(8).toString("hex"), elevated, signal: ac.signal }), stopped]); } catch { r = null; }
+    finally { if (restoreAbort === ac) restoreAbort = null; }
     const outcome = r && Object.hasOwn(RESTORE_MESSAGES, r.outcome) ? r.outcome : "failed";
-    const message = outcome === "failed" && r && r.detail === "timeout" ? TIMEOUT_MESSAGE : RESTORE_MESSAGES[outcome];
+    const message = outcome === "failed" && r && r.detail === "timeout" ? TIMEOUT_MESSAGE
+      : outcome === "failed" && r && r.detail === "stopped" ? STOPPED_MESSAGE : RESTORE_MESSAGES[outcome];
     phase({ phase: "restore", detail: message });
     if (outcome === "made") return true;
     let go = false;
@@ -316,9 +335,16 @@ export function createController({
 
   async function ritualLoop(run, server, closeWindow, isWindowClosed, ctx) {
     let state;
+    let lastDone = -1;
     for (;;) {
       try { state = server.getState(); } catch { state = "failed"; }
       if (TERMINAL.has(state)) break;
+      if (state === "deleting" && typeof server.getProgress === "function") {
+        try {
+          const g = server.getProgress();
+          if (g && Number.isFinite(g.done) && Number.isFinite(g.total) && g.done !== lastDone) { lastDone = g.done; phase({ phase: "deleting", detail: "Deleting... " + g.done + " of " + g.total }); }
+        } catch { /* progress is cosmetic */ }
+      }
       if (isWindowClosed() && (state === "armed" || state === "unlocked")) {
         try { server.close(); } catch { /* closed */ }
         auditCancelled(run);
@@ -364,12 +390,22 @@ export function createController({
       if (!(await restoreStep())) { phase({ phase: "done", detail: TEXT.stopped }); return { ok: false, stopped: true }; }
     }
 
+    // Every long loop below hands the event loop back every 50 items and tells the window how far it got.
+    const total = chosen.length;
+    const checking = n => phase({ phase: "checking", detail: n === 0 ? "Checking " + plural(total, "item", "items") + "..." : "Checking... " + n + " of " + total });
+    const chunked = async (list, fn) => {
+      for (let i = 0; i < list.length; i++) {
+        fn(list[i]);
+        if ((i + 1) % 50 === 0) { checking(i + 1); await yieldNow(); }
+      }
+    };
+    checking(0);
     let sel;
     try {
       // Excluded folders again, from the file as it is NOW (the list can change while the user answers the questions above).
       const excl = exclusionsNow();
       const excludedNow = exclusionMatcher(excl, { deep: true });
-      if (chosen.some(i => excludedNow(i.path))) throw new Error("excluded");
+      await chunked(chosen, i => { if (excludedNow(i.path)) throw new Error("excluded"); });
       const map = {
         sessionId: "nuke-uninstaller",
         items: result.items.map(i => ({ id: i.id, group: i.group, path: i.path, sharedWith: Array.isArray(i.sharedWith) ? i.sharedWith : [] })),
@@ -380,23 +416,27 @@ export function createController({
       const ids = chosen.map(i => i.id);
       sel = buildSelection(map, ids, { allowShared: chosen.filter(i => i.group === "shared").map(i => i.id) });
       // R32 again on the frozen paths, then the engine's on-disk check (it must exist and pass checkPath now).
-      if (sel.paths.some(p => violatesRoots(p, protectedRoots))) throw new Error("protected root");
-      if (sel.paths.some(p => neverTouch(p))) throw new Error("never-touch");
-      revalidate(sel, { adminContents: elevated });
+      const { violates, neverTouch } = guardsNow();
+      await chunked(sel.paths, p => {
+        if (violates(p)) throw new Error("protected root");
+        if (neverTouch(p)) throw new Error("never-touch");
+      });
+      await revalidateAsync(sel, { adminContents: elevated, onProgress: n => checking(n) });
       // Age and lock re-check just before the run starts (the server repeats the age check entry by entry at delete time).
       if (!Number.isFinite(scanStartMs)) throw new Error("no scan time");
-      for (const it of chosen) {
+      await chunked(chosen, it => {
         const st = fs.lstatSync(it.path);
         if (changedAfter(st, scanStartMs)) throw new Error("changed since the scan");
         if (it.kind === "file" && isLocked(it.path)) throw new Error("locked");
-      }
+      });
     } catch {
       phase({ phase: "error", detail: TEXT.changed });
       return { ok: false };
     }
 
     let run;
-    try { run = await startRun(sel, { runDir: paths.runDir, adminContents: elevated, scanStartMs, plainConfirm: settings.plainConfirm === true }); } catch {
+    const preparing = ev => { if (ev && Number.isFinite(ev.done) && Number.isFinite(ev.total)) phase({ phase: "checking", detail: "Preparing... " + ev.done + " of " + ev.total }); };
+    try { run = await startRun(sel, { runDir: paths.runDir, adminContents: elevated, scanStartMs, plainConfirm: settings.plainConfirm === true, onProgress: preparing }); } catch {
       phase({ phase: "error", detail: TEXT.startFailed });
       return { ok: false };
     }
@@ -557,6 +597,7 @@ export function createController({
 
     async scanCancel() {
       if (scanAbort) scanAbort.abort();
+      if (restoreAbort) restoreAbort.abort();
       return { ok: true };
     },
 
@@ -570,8 +611,9 @@ export function createController({
       if (!identityKnown) { phase({ phase: "error", detail: IDENTITY_UNKNOWN_MESSAGE }); throw new Refusal(IDENTITY_UNKNOWN_MESSAGE); }
       if (busy) throw busyError();
       const ids = arg && typeof arg === "object" ? arg.ids : undefined;
-      const chosen = choose(ids); // throws "refused" before anything is shown or started
-      busy = "delete";
+      busy = "delete"; // taken first: choose() hands the event loop back while it works, so a second request must see "busy"
+      let chosen;
+      try { chosen = await choose(ids); } catch (e) { busy = null; throw e; } // throws "refused" before anything is shown or started
       try { return await deleteFlow(chosen); }
       catch { phase({ phase: "error", detail: GENERIC_ERROR }); return { ok: false }; }
       finally { busy = null; currentRun = null; }

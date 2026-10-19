@@ -59,7 +59,7 @@ async function boot(over) {
 
 test("phaseText exact strings for restore and ritual; unknown phase -> generic text", async () => {
   const { phaseText, PHASES } = await import("../../app/renderer/phases.js");
-  assert.deepEqual(PHASES, ["idle", "scanning", "results", "warning", "restore", "ritual", "done", "error"]);
+  assert.deepEqual(PHASES, ["idle", "scanning", "results", "warning", "restore", "checking", "ritual", "deleting", "done", "error"]);
   assert.equal(phaseText("restore"), "Windows is creating a system restore point");
   assert.equal(phaseText("ritual"), "The final confirmation is below: turn the key, lift the glass cover and press the red button");
   assert.equal(phaseText("done", "Freed 3 MB"), "Freed 3 MB");
@@ -368,6 +368,21 @@ test("restore phase screen shows the outcome text; error phase from main stays o
   const line = find(doc, e => e.getAttribute("class") === "phase-text")[0];
   assert.equal(line.textContent, "The scan could not be completed. Nothing was changed.");
   assert.equal(line.parent.hidden, false);
+});
+
+test("restore step: a Stop waiting button (with its description) shows only while waiting and calls cancelScan; live count phases", async () => {
+  const { doc, nuke } = await boot();
+  const { DESCRIPTIONS } = await import("../../app/renderer/main.js");
+  nuke.handlers.phase({ phase: "restore" });
+  const b = btn(doc, "Stop waiting");
+  assert.ok(find(doc, e => e.textContent === DESCRIPTIONS.stopWaiting).length >= 1, "description beside the button");
+  await b.fire("click");
+  assert.ok(nuke.calls.some(c => c[0] === "cancelScan"));
+  nuke.handlers.phase({ phase: "restore", detail: "No restore point: you stopped waiting for it." });
+  assert.equal(b.parent.hidden, true, "hidden once the step has an outcome");
+  nuke.handlers.phase({ phase: "checking", detail: "Checking... 150 of 3585" });
+  const line = find(doc, e => e.getAttribute("class") === "phase-text")[0];
+  assert.equal(line.textContent, "Checking... 150 of 3585");
 });
 
 test("M6 a busy rejection shows the friendly sentence, not the generic one", async () => {

@@ -56,7 +56,7 @@ test("delete passes plainConfirm:false by default and plainConfirm:true after th
       assert.equal(r.ok, true);
       assert.equal(startRun.calls.length, 1);
       assert.strictEqual(startRun.calls[0].opts.plainConfirm, want);
-      assert.deepEqual(Object.keys(startRun.calls[0].opts).sort(), ["adminContents", "plainConfirm", "runDir", "scanStartMs"]);
+      assert.deepEqual(Object.keys(startRun.calls[0].opts).sort(), ["adminContents", "onProgress", "plainConfirm", "runDir", "scanStartMs"]);
     }
   } finally { t.cleanup(); }
 });

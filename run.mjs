@@ -10,6 +10,7 @@ import { scanSession, readRunningSessions, pidAlive, TOOL_PROTECTED } from "./sc
 import { acquireLock, setLockPort, releaseLock } from "./lib/lock.mjs";
 import { createCleanupServer, selectionHash } from "./server.mjs";
 import { checkPath, within, dirArgProblem } from "./lib/safepath.mjs";
+import { yieldNow } from "./lib/cooperative.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const ID_RE = /^[A-Za-z0-9-]{1,64}$/;
@@ -62,6 +63,19 @@ export function revalidate(sel, { adminContents = false } = {}) {
   for (const p of sel.paths) {
     const v = checkPath(p, opts);
     if (!v.ok) throw new Error(`refused: ${clean(p)} (${clean(v.reason, 120)})`);
+  }
+}
+
+// The same check on every path, in the same order, but the event loop gets a turn every `every` paths (the app's main process
+// must not freeze for thousands of items). `onProgress(done, total)` is called at each break.
+export async function revalidateAsync(sel, { adminContents = false, every = 50, onProgress } = {}) {
+  if (typeof adminContents !== "boolean") throw new TypeError("adminContents must be a boolean");
+  const opts = { allowedRoots: sel.allowedRoots, protectedPaths: sel.protectedPaths, livePaths: sel.livePaths, adminContents };
+  for (let i = 0; i < sel.paths.length; i++) {
+    const p = sel.paths[i];
+    const v = checkPath(p, opts);
+    if (!v.ok) throw new Error(`refused: ${clean(p)} (${clean(v.reason, 120)})`);
+    if ((i + 1) % every === 0) { if (typeof onProgress === "function") onProgress(i + 1, sel.paths.length); await yieldNow(); }
   }
 }
 
@@ -161,7 +175,8 @@ export async function launchNuke({ claudeDir, sessionId, roots, targetIsLive = t
 
 // Library entry (also used by the app): freeze an already-built selection into runDir (lock first, then selection.json, exact-bytes
 // read-back), then start the server with the trusted options taken from the selection. Never deletes.
-export async function startFrozenRun(sel, { runDir, isAlive = pidAlive, createServer = createCleanupServer, serverOpts = {}, adminContents = false, scanStartMs, plainConfirm = false } = {}) {
+export async function startFrozenRun(sel, { runDir, isAlive = pidAlive, createServer = createCleanupServer, serverOpts = {}, adminContents = false, scanStartMs, plainConfirm = false, onProgress } = {}) {
+  if (onProgress !== undefined && typeof onProgress !== "function") throw new TypeError("onProgress must be a function");
   if (typeof adminContents !== "boolean") throw new TypeError("adminContents must be a boolean");
   // Trusted option from the app's own settings (never from a page or a request): the plain 2D confirm page instead of the 3D room.
   if (typeof plainConfirm !== "boolean") throw new TypeError("plainConfirm must be a boolean");
@@ -189,6 +204,7 @@ export async function startFrozenRun(sel, { runDir, isAlive = pidAlive, createSe
       expectedSha256: sel.sha256, allowedRoots: sel.allowedRoots, protectedPaths: sel.protectedPaths, livePaths: sel.livePaths,
       adminContents,
       scanStartMs,
+      ...(onProgress ? { onProgress } : {}),
       onClose: () => releaseLock(lockFile),
     });
     const { url } = await server.listen();
