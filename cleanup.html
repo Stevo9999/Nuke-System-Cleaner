@@ -519,6 +519,9 @@ function squarify(items, x, y, w, h) {
 // Server text reaches the page only through fillText / textContent.
 const num = v => { v = Number(v); return Number.isFinite(v) && v > 0 ? Math.min(v, 2 ** 53) : 0; };   // never NaN, negative or absurd
 const normP = p => String(p).replace(/\//g, '\\').toLowerCase();
+// Render budgets for the result view: a run of thousands of items must not freeze the page.
+const CELL_CAP = 300, LOG_CAP = 500, LOG_CHUNK = 100, SPARK_BUDGET = 3000;
+const driveOf = p => { const m = /^[A-Za-z]:[\\/]/.exec(String(p)); return m ? m[0][0].toUpperCase() : '/'; };
 function showDiskMap() {
   const d = doneEvent; if (!d) return;
   const results = Array.isArray(d.results) ? d.results.filter(r => r && typeof r === 'object') : [];
@@ -544,27 +547,59 @@ function showDiskMap() {
   });
   const anyDeleted = rows.some(x => x.kind === 'deleted');
   const keptCount = rows.filter(x => ['refused', 'noresult', 'kept'].includes(x.kind)).length;
-  // Treemap cells: only sized, non-refused items not covered by a listed parent.
-  const mapped = rows.filter(x => !x.it.refused && !x.it.coveredBy && x.value > 0).sort((p, q) => q.value - p.value);
+  // Treemap cells: only sized, non-refused items not covered by a listed parent. A big run (thousands of items) froze the page when every
+  // item got its own cell, sparks and log row, so the map shows the biggest CELL_CAP items and ONE aggregated "other" cell for the rest.
+  const mappedAll = rows.filter(x => !x.it.refused && !x.it.coveredBy && x.value > 0).sort((p, q) => q.value - p.value);
+  const mapped = mappedAll.slice(0, CELL_CAP);
+  const rest = mappedAll.slice(CELL_CAP);
+  let other = null;
+  if (rest.length) {
+    const delRows = rest.filter(x => x.kind === 'deleted');
+    const delBytes = delRows.reduce((n, x) => n + num(x.r.bytes), 0), byDrive = new Map();
+    for (const x of delRows) { const k = driveOf(x.it.path); byDrive.set(k, (byDrive.get(k) || 0) + x.value); }
+    const otherLabel = 'other (' + rest.length + ' items, ' + fmt(rest.reduce((n, x) => n + x.value, 0)) + ')';
+    // all deleted -> detonates like any cell; anything else is drawn as NOT removed (with the exact split), never as a clean sweep
+    other = { it: { path: otherLabel }, r: { bytes: delBytes, status: 'mixed', reason: delRows.length + ' deleted, ' + (rest.length - delRows.length) + ' NOT removed' },
+      kind: delRows.length === rest.length ? 'deleted' : 'kept', value: rest.reduce((n, x) => n + x.value, 0), agg: { delBytes, byDrive } };
+    mapped.push(other);
+  }
 
   const mapEl = $('#map'), app = $('#app');
   mapEl.classList.add('show'); body.classList.remove('armed'); app.inert = true;
   put($('#verdict'), 'Blast radius');
   const ul = $('#results'); ul.replaceChildren();
-  for (const x of rows) {
+  // The log lists what was NOT removed first (those matter most), then deleted, then already-gone/covered. It is built in chunks of
+  // LOG_CHUNK lines per animation frame, and the long tail is capped: every item is still in the audit log and the totals above are exact.
+  const logOf = x => {
     const nm = cleanPath(x.it.path), r = x.r;
-    const [cls, text] = x.kind === 'refused' ? ['kept', 'NOT removed (refused before launch: ' + short(x.it.reason) + '): ' + nm]
+    return x.kind === 'refused' ? ['kept', 'NOT removed (refused before launch: ' + short(x.it.reason) + '): ' + nm]
       : x.kind === 'noresult' ? ['kept', 'NOT removed (no result reported): ' + nm]
       : x.kind === 'deleted' ? ['ok', 'Deleted ' + fmt(num(r.bytes)) + ': ' + nm]
       : x.kind === 'covered' ? ['nocell', 'Removed with ' + cleanPath(x.it.coveredBy) + ': ' + nm]
       : x.kind === 'gone' ? ['nocell', 'Already gone: ' + nm]
       : ['kept', 'NOT removed (' + short(r.status) + (r.reason ? ': ' + short(r.reason) : '') + '): ' + nm];
-    ul.append(el('li', text, cls));
-  }
+  };
+  const isKept = x => ['refused', 'noresult', 'kept'].includes(x.kind);
+  const logRows = [...rows.filter(isKept), ...rows.filter(x => !isKept(x))];
+  const keptRows = logRows.length - rows.filter(x => !isKept(x)).length;
+  const logShown = Math.min(logRows.length, Math.max(keptRows, LOG_CAP));   // never hide a not-removed item behind the cap
+  let logAt = 0, logRaf = 0;
+  const logStep = () => {
+    logRaf = 0;
+    const end = Math.min(logShown, logAt + LOG_CHUNK), frag = [];
+    for (; logAt < end; logAt++) { const [cls, text] = logOf(logRows[logAt]); frag.push(el('li', text, cls)); }
+    ul.append(...frag);
+    if (logAt < logShown) { logRaf = requestAnimationFrame(logStep); return; }
+    if (logShown < logRows.length) ul.append(el('li', '... and ' + (logRows.length - logShown) + ' more (all of them are in the audit log)', 'nocell'));
+  };
+  logStep();
 
   const c = $('#mapc'), g = c.getContext('2d');
   let W = 0, H = 0, cells = [], zoom = null, drives = [];
   const GAP = Math.min(0.45, 5 / Math.max(1, mapped.length)), START = 1.6;
+  // per-drive selection size over ALL mapped items (exact, computed once, not per frame)
+  const selByDrive = new Map();
+  for (const m of mappedAll) { const k = driveOf(m.it.path); selByDrive.set(k, (selByDrive.get(k) || 0) + m.value); }
   function layout() {
     const dpr = devicePixelRatio || 1;
     W = Math.max(200, c.clientWidth); H = Math.max(160, c.clientHeight);
@@ -574,19 +609,19 @@ function showDiskMap() {
     zoom = { x: W * 0.06, y: Math.min(H * 0.5, stripsH + 36), w: W * 0.88, h: 0 };
     zoom.h = Math.max(60, H - zoom.y - 12);
     cells = squarify(mapped, zoom.x, zoom.y, zoom.w, zoom.h);
-    cells.forEach((cl, k) => { cl.t = START + k * GAP; cl.row = cl.item; cl.r = cl.row.r; cl.ok = cl.row.kind === 'deleted'; });
+    cells.forEach((cl, k) => { cl.t = START + k * GAP; cl.row = cl.item; cl.r = cl.row.r; cl.ok = cl.row.kind === 'deleted'; cl.drive = cl.row.agg ? null : driveOf(cl.row.it.path); });
   }
   const parts = [];
   function seedSparks() {
     parts.length = 0;
     if (reduced) return;
-    for (const cl of cells) if (cl.ok) for (let i = 0; i < 60; i++) {
+    const okCells = cells.filter(cl => cl.ok).length, per = Math.max(3, Math.min(60, Math.floor(SPARK_BUDGET / Math.max(1, okCells))));
+    for (const cl of cells) if (cl.ok) for (let i = 0; i < per; i++) {
       const a = Math.random() * Math.PI * 2, sp = 60 + Math.random() * 260;
       parts.push({ cl, u: Math.random(), v: Math.random(), vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 40, hue: 10 + Math.random() * 40 });
     }
   }
-  const driveOf = p => { const m = /^[A-Za-z]:[\\/]/.exec(String(p)); return m ? m[0][0].toUpperCase() : '/'; };
-  const END = () => START + cells.length * GAP + 1.0;
+  const END =() => START + cells.length * GAP + 1.0;
   const label = (txt, x, y, maxW) => { let s = String(txt); while (s.length > 1 && g.measureText(s).width > maxW) s = s.slice(0, -2); g.fillText(s === String(txt) ? s : s + '…', x, y); };
 
   function draw(t) {
@@ -595,7 +630,11 @@ function showDiskMap() {
     const gone = new Map();
     for (const cl of cells) {
       const age = t - cl.t;
-      if (cl.ok && age > 0.5) { freed += num(cl.r.bytes); const k = driveOf(cl.row.it.path); gone.set(k, (gone.get(k) || 0) + cl.row.value); }
+      if (cl.row.agg) {                                           // the aggregated "other" cell: count exactly what was deleted inside it
+        if (age > 0.5) { freed += cl.row.agg.delBytes; for (const [k, v] of cl.row.agg.byDrive) gone.set(k, (gone.get(k) || 0) + v); }
+        else if (cl.ok && age > 0) freed += num(cl.r.bytes) * (age / 0.5);
+      }
+      else if (cl.ok && age > 0.5) { freed += num(cl.r.bytes); const k = cl.drive; gone.set(k, (gone.get(k) || 0) + cl.row.value); }
       else if (cl.ok && age > 0) freed += num(cl.r.bytes) * (age / 0.5);
     }
     // overview strips: whole drive as it was before; the red sliver is the selection, shrinking as items clear
@@ -603,7 +642,7 @@ function showDiskMap() {
     drives.forEach(([root, dv], n) => {
       const bx = W * 0.06, bw = W * 0.88, by = 24 + n * 46, bh = 16, total = num(dv.total), used = Math.min(total, num(total - num(dv.free)));
       const k = driveOf(root);
-      const sel = mapped.filter(m => driveOf(m.it.path) === k).reduce((s, m) => s + m.value, 0);
+      const sel = selByDrive.get(k) || 0;
       const sliver = Math.min(Math.max(0, sel - (gone.get(k) || 0)), used);
       g.fillStyle = '#15151a'; g.fillRect(bx, by, bw, bh);
       g.fillStyle = '#3a3a44'; g.fillRect(bx, by, bw * (used / total), bh);
@@ -615,7 +654,7 @@ function showDiskMap() {
       g.strokeStyle = 'rgba(255,80,60,.3)'; g.beginPath(); g.moveTo(W * 0.94, 24 + 16 + (drives.length - 1) * 46); g.lineTo(zoom.x + zoom.w, zoom.y - 14); g.moveTo(W * 0.9, 24 + 16 + (drives.length - 1) * 46); g.lineTo(zoom.x, zoom.y - 14); g.stroke();
     }
     g.fillStyle = '#888'; g.font = '12px system-ui';
-    g.fillText(cells.length ? 'zoomed in: only the selected items, sized by bytes' : 'nothing with a size to draw', zoom.x, zoom.y - 6);
+    g.fillText(cells.length ? (other ? 'zoomed in: the ' + CELL_CAP + ' biggest selected items, sized by bytes, and one cell for all the others' : 'zoomed in: only the selected items, sized by bytes') : 'nothing with a size to draw', zoom.x, zoom.y - 6);
 
     for (const cl of cells) {
       const age = t - cl.t, cx = cl.x + 1, cy = cl.y + 1, cw = Math.max(0, cl.w - 2), ch = Math.max(0, cl.h - 2);
@@ -635,7 +674,7 @@ function showDiskMap() {
         const base = cleanPath(cl.row.it.path).split(/[\\/]/).filter(Boolean).pop() || cleanPath(cl.row.it.path);
         if (showText) { g.fillStyle = '#fff'; label(fmt(cl.row.value) + '  ' + base, cx + 6, cy + 15, cw - 12); }
         else { g.fillStyle = '#556'; label(base, cx + 6, cy + 15, cw - 12); }
-        if (age >= 0 && !cl.ok && ch > 40) { g.fillStyle = '#e0b0a0'; label('NOT removed: ' + (cl.r ? short(cl.r.reason || cl.r.status) : 'no result'), cx + 6, cy + ch - 8, cw - 12); }
+        if (age >= 0 && !cl.ok && ch > 40) { g.fillStyle = '#e0b0a0'; label(cl.row.agg ? cl.r.reason : 'NOT removed: ' + (cl.r ? short(cl.r.reason || cl.r.status) : 'no result'), cx + 6, cy + ch - 8, cw - 12); }
         g.restore();
       }
     }
@@ -687,7 +726,7 @@ function showDiskMap() {
   if (reduced) { stopped = true; draw(END()); $('#mapclose').focus({ preventScroll: true }); }   // no animation: show the final state at once
   else raf = requestAnimationFrame(tick);
   $('#mapclose').onclick = () => {
-    stopped = true; cancelAnimationFrame(raf); removeEventListener('resize', onResize);
+    stopped = true; cancelAnimationFrame(raf); cancelAnimationFrame(logRaf); removeEventListener('resize', onResize);
     if (mq && mq.removeEventListener) mq.removeEventListener('change', onDpr);
     mapEl.classList.remove('show'); app.inert = false; body.classList.add('spent');
     $('#banner').replaceChildren(document.createTextNode(summary || 'Cleanup finished.'));
@@ -934,7 +973,7 @@ function frame(now) {
   camera.position.set(CAM0.x, CAM0.y - pushT * 2.2, CAM0.z - pushT * 5);
   if (shake > 0) { shake = Math.max(0, shake - dt * 0.35); camera.position.x += (Math.random() - 0.5) * shake * 1.4; camera.position.y += (Math.random() - 0.5) * shake * 1.4; }
   camera.lookAt(LOOK);
-  renderer.render(scene, camera);
+  if (!mapShown) renderer.render(scene, camera);   // the opaque result view covers the scene: do not spend the GPU on a hidden 3D render
 
   put($('#hint'), glassHint(stage, keyState, serverState, glassAngle));
 }
