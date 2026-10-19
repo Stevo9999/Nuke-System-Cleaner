@@ -520,8 +520,76 @@ function squarify(items, x, y, w, h) {
 const num = v => { v = Number(v); return Number.isFinite(v) && v > 0 ? Math.min(v, 2 ** 53) : 0; };   // never NaN, negative or absurd
 const normP = p => String(p).replace(/\//g, '\\').toLowerCase();
 // Render budgets for the result view: a run of thousands of items must not freeze the page.
-const CELL_CAP = 300, LOG_CAP = 500, LOG_CHUNK = 100, SPARK_BUDGET = 3000;
+const CELL_CAP = 300, LOG_CAP = 500, LOG_CHUNK = 100;
 const driveOf = p => { const m = /^[A-Za-z]:[\\/]/.exec(String(p)); return m ? m[0][0].toUpperCase() : '/'; };
+
+/* explosion:begin */
+// An original pixel-art fireball, generated here from a seeded PRNG (no image files, no GIF, nobody else's artwork). 12 frames of 64x64 virtual
+// pixels: a noisy blob that grows and then dissolves, 6 palette steps from pale yellow to dark brown, an ordered-dither edge and a few ember specks.
+// Deterministic: the same seed always gives the same pixels. Index 0 = transparent, 1..6 = EXP_PAL.
+const EXP_N = 12, EXP_PX = 64, EXP_SEED = 20240611, EXP_MAX = 5, EXP_DUR = 0.9, EXP_STAGGER = [0, 0.25, 0.5, 0.8, 1.1];
+const EXP_PAL = ['#fff6b8', '#ffd83c', '#ff9b1e', '#d4581a', '#8a3a14', '#4e2410'];
+const EXP_BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+function expHash(x, y, s) { let h = Math.imul(x, 374761393) ^ Math.imul(y, 668265263) ^ Math.imul(s, 2246822519); h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
+function expNoise(x, y, s) {
+  const x0 = Math.floor(x), y0 = Math.floor(y), fx = x - x0, fy = y - y0, u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
+  const a = expHash(x0, y0, s), b = expHash(x0 + 1, y0, s), c = expHash(x0, y0 + 1, s), d = expHash(x0 + 1, y0 + 1, s);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+function explosionFrames(seed = EXP_SEED) {
+  const frames = [];
+  for (let f = 0; f < EXP_N; f++) {
+    const p = f / (EXP_N - 1), px = new Uint8Array(EXP_PX * EXP_PX);
+    const R = 30 * Math.min(1, 0.16 + 1.25 * Math.sqrt(p)) * (1 - 0.25 * Math.max(0, p - 0.55)), cy = 34 - 6 * p;
+    for (let y = 0; y < EXP_PX; y++) for (let x = 0; x < EXP_PX; x++) {
+      const dx = (x - 32) / R, dy = (y - cy) / (R * 0.9);
+      const n = expNoise(x / 7 + f * 0.35, y / 7 - f * 0.5, seed) * 0.65 + expNoise(x / 3.5, y / 3.5 + f * 0.7, seed + 1) * 0.35;
+      let heat = 1 - Math.hypot(dx, dy) + (n - 0.5) * 0.9;
+      heat -= Math.max(0, p - 0.4) * 0.9 * (0.4 + n) + p * 0.3;                          // dissolves and cools
+      const q = heat + (EXP_BAYER[(y & 3) * 4 + (x & 3)] / 16 - 0.5) * 0.22;           // ordered dither
+      px[y * EXP_PX + x] = q > 0.9 ? 1 : q > 0.7 ? 2 : q > 0.5 ? 3 : q > 0.34 ? 4 : q > 0.2 ? 5 : q > 0.08 ? 6 : 0;
+    }
+    if (p < 0.85) for (let k = 0; k < 7; k++) {                                         // ember specks thrown outwards
+      const a = expHash(k, f, seed + 7) * Math.PI * 2, rr = R * (1.15 + expHash(k, 0, seed + 8) * 0.6) * (1 + p * 0.3);
+      const ex = Math.round(32 + Math.cos(a) * rr), ey = Math.round(cy + Math.sin(a) * rr * 0.9);
+      if (ex >= 0 && ex < EXP_PX && ey >= 0 && ey < EXP_PX && !px[ey * EXP_PX + ex]) px[ey * EXP_PX + ex] = 2 + (k % 3);
+    }
+    frames.push(px);
+  }
+  return frames;
+}
+// At most EXP_MAX explosions for the whole map, however many items there are: the biggest cells that were really deleted, kept apart.
+function pickExplosions(cells, minDist) {
+  const cand = cells.filter(cl => cl.ok && cl.w > 4 && cl.h > 4).sort((a, b) => b.row.value - a.row.value);
+  const out = [];
+  for (const cl of cand) {
+    if (out.length >= EXP_MAX) break;
+    const cx = cl.x + cl.w / 2, cy = cl.y + cl.h / 2;
+    if (out.every(o => Math.hypot(o.cx - cx, o.cy - cy) >= minDist)) out.push({ cl, cx, cy, start: EXP_STAGGER[out.length] });
+  }
+  return out;
+}
+let expAtlasCache;
+function explosionAtlas() {   // one offscreen canvas, 4 frames per row; null when there is no canvas (then the map simply has no fireballs)
+  if (expAtlasCache !== undefined) return expAtlasCache;
+  expAtlasCache = null;
+  try {
+    const cvs = document.createElement('canvas'); cvs.width = EXP_PX * 4; cvs.height = EXP_PX * Math.ceil(EXP_N / 4);
+    const a = cvs.getContext && cvs.getContext('2d'); if (!a) return null;
+    a.imageSmoothingEnabled = false;
+    explosionFrames().forEach((px, f) => {
+      const ox = (f % 4) * EXP_PX, oy = Math.floor(f / 4) * EXP_PX;
+      for (let y = 0; y < EXP_PX; y++) for (let x = 0; x < EXP_PX;) {
+        const v = px[y * EXP_PX + x]; let e = x + 1; while (e < EXP_PX && px[y * EXP_PX + e] === v) e++;
+        if (v) { a.fillStyle = EXP_PAL[v - 1]; a.fillRect(ox + x, oy + y, e - x, 1); }
+        x = e;
+      }
+    });
+    expAtlasCache = cvs;
+  } catch (e) { expAtlasCache = null; }
+  return expAtlasCache;
+}
+/* explosion:end */
 function showDiskMap() {
   const d = doneEvent; if (!d) return;
   const results = Array.isArray(d.results) ? d.results.filter(r => r && typeof r === 'object') : [];
@@ -548,7 +616,7 @@ function showDiskMap() {
   const anyDeleted = rows.some(x => x.kind === 'deleted');
   const keptCount = rows.filter(x => ['refused', 'noresult', 'kept'].includes(x.kind)).length;
   // Treemap cells: only sized, non-refused items not covered by a listed parent. A big run (thousands of items) froze the page when every
-  // item got its own cell, sparks and log row, so the map shows the biggest CELL_CAP items and ONE aggregated "other" cell for the rest.
+  // item got its own cell, particles and log row, so the map shows the biggest CELL_CAP items and ONE aggregated "other" cell for the rest.
   const mappedAll = rows.filter(x => !x.it.refused && !x.it.coveredBy && x.value > 0).sort((p, q) => q.value - p.value);
   const mapped = mappedAll.slice(0, CELL_CAP);
   const rest = mappedAll.slice(CELL_CAP);
@@ -610,18 +678,13 @@ function showDiskMap() {
     zoom.h = Math.max(60, H - zoom.y - 12);
     cells = squarify(mapped, zoom.x, zoom.y, zoom.w, zoom.h);
     cells.forEach((cl, k) => { cl.t = START + k * GAP; cl.row = cl.item; cl.r = cl.row.r; cl.ok = cl.row.kind === 'deleted'; cl.drive = cl.row.agg ? null : driveOf(cl.row.it.path); });
+    // the (at most 5) fireballs: each hosts a cell that really was deleted, and that cell detonates at the same moment
+    explosions = pickExplosions(cells, Math.max(zoom.w, zoom.h) * 0.12);
+    for (const e of explosions) { e.t0 = START + e.start; e.cl.t = e.t0; }
   }
-  const parts = [];
-  function seedSparks() {
-    parts.length = 0;
-    if (reduced) return;
-    const okCells = cells.filter(cl => cl.ok).length, per = Math.max(3, Math.min(60, Math.floor(SPARK_BUDGET / Math.max(1, okCells))));
-    for (const cl of cells) if (cl.ok) for (let i = 0; i < per; i++) {
-      const a = Math.random() * Math.PI * 2, sp = 60 + Math.random() * 260;
-      parts.push({ cl, u: Math.random(), v: Math.random(), vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 40, hue: 10 + Math.random() * 40 });
-    }
-  }
-  const END =() => START + cells.length * GAP + 1.0;
+  const expAtlas = explosionAtlas();
+  let explosions = [];
+  const END = () => START + Math.max(cells.length * GAP, EXP_STAGGER[EXP_MAX - 1]) + 1.0;
   const label = (txt, x, y, maxW) => { let s = String(txt); while (s.length > 1 && g.measureText(s).width > maxW) s = s.slice(0, -2); g.fillText(s === String(txt) ? s : s + '…', x, y); };
 
   function draw(t) {
@@ -678,9 +741,14 @@ function showDiskMap() {
         g.restore();
       }
     }
-    for (const p of parts) {                                      // sparks, only for server-confirmed deletions
-      const a = t - p.cl.t; if (a < 0 || a > 1.1) continue;
-      g.fillStyle = `hsla(${p.hue},100%,60%,${1 - a / 1.1})`; g.fillRect(p.cl.x + p.u * p.cl.w + p.vx * a, p.cl.y + p.v * p.cl.h + p.vy * a + 220 * a * a, 3, 3);
+    if (expAtlas) for (const e of explosions) {                   // at most EXP_MAX fireballs, only on cells the server confirmed deleted
+      const age = t - e.t0;
+      if (!reduced && (age < 0 || age >= EXP_DUR)) continue;
+      const fr = reduced ? 5 : Math.min(EXP_N - 1, Math.floor(age / EXP_DUR * EXP_N)), alpha = reduced ? 0.35 : Math.min(1, (EXP_DUR - age) / 0.2);
+      const s = EXP_PX * clamp(Math.round(Math.sqrt(e.cl.w * e.cl.h) * 2.4 / EXP_PX), 2, 4);   // whole-number scale keeps the pixels crisp
+      g.imageSmoothingEnabled = false; g.globalAlpha = alpha;
+      g.drawImage(expAtlas, (fr % 4) * EXP_PX, Math.floor(fr / 4) * EXP_PX, EXP_PX, EXP_PX, Math.round(e.cx - s / 2), Math.round(e.cy - s / 2), s, s);
+      g.globalAlpha = 1;
     }
 
     const finished = t >= END();
@@ -710,7 +778,7 @@ function showDiskMap() {
   let summary = '';
   let T0 = performance.now(), raf = 0, stopped = false, mq = null;
   const redraw = () => draw(stopped ? END() : (performance.now() - T0) / 1000);
-  const onResize = () => { layout(); seedSparks(); redraw(); };
+  const onResize = () => { layout(); redraw(); };
   const watchDpr = () => {                                        // a monitor / zoom change alters devicePixelRatio without a resize event
     if (!window.matchMedia) return;
     mq = matchMedia('(resolution: ' + (devicePixelRatio || 1) + 'dppx)');
@@ -721,7 +789,7 @@ function showDiskMap() {
     const t = (now - T0) / 1000; draw(t);
     if (t < END() && !stopped) raf = requestAnimationFrame(tick); else { stopped = true; $('#mapclose').focus({ preventScroll: true }); }
   };
-  layout(); seedSparks();
+  layout();
   addEventListener('resize', onResize); watchDpr();
   if (reduced) { stopped = true; draw(END()); $('#mapclose').focus({ preventScroll: true }); }   // no animation: show the final state at once
   else raf = requestAnimationFrame(tick);
