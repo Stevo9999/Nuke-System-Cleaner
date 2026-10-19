@@ -1,4 +1,4 @@
-﻿# Nuke-Uninstaller
+# Nuke-Uninstaller
 
 A Windows program that helps you **remove programs and the junk they leave behind**, with safety checks and a deliberately dramatic confirmation (a 3D key, a glass cover and a big red button) so nothing is deleted by accident.
 
@@ -35,7 +35,7 @@ On the **Releases** page of this repository you can download either of these sin
 
 If you took the zip, unzip it and then either:
 
-* **Install:** double-click **`Install-Nuke-Uninstaller.exe`** (or `Install.bat`). A setup wizard opens: read and accept the terms, choose the install folder (the default is `C:\Program Files\Nuke-Uninstaller`), click Install. It adds desktop and Start-menu shortcuts and offers to start the program. Windows asks for permission once. To remove it later use Windows Settings > Apps > Installed apps. The setup wizard lets you choose the install folder. The optional administrator mode is only offered when it is installed under `C:\Program Files`.
+* **Install:** double-click **`Install-Nuke-Uninstaller.exe`** (or `Install.bat`). A setup wizard opens: read and accept the terms, choose the install folder (the default is `C:\Program Files\Nuke-Uninstaller`), click Install. It adds desktop and Start-menu shortcuts and offers to start the program. Windows asks for permission once. To remove it later use Windows Settings > Apps > Installed apps. The optional administrator mode is only offered when it is installed under `C:\Program Files`.
 * **No install:** double-click **`Nuke-Uninstaller-Portable.exe`**. It is completely standalone: it needs no installer, no other file and no install step, and runs from anywhere, including a USB drive. Administrator mode is not available from this version.
 
 Requirements: Windows 10 or 11, 64-bit. It was developed and tested on Windows 11.
@@ -76,12 +76,14 @@ More detail for technical readers: [docs/TECHNICAL.md](docs/TECHNICAL.md) and [d
 
 **Please read this before you delete anything.**
 
+<!-- disclaimer:start -->
 * Nuke-Uninstaller is provided "as is", without any warranty. It is a free hobby project and you use it at your own risk.
 * It deletes files permanently. Deleted items do not go to the Recycle Bin. A Windows restore point can bring back Windows settings and installed programs, but it cannot bring back your personal files. Back up anything important before you use this program.
 * Uninstalling a program or removing a Windows app can stop other software that depends on it from working. Read each confirmation before you continue.
 * I AM NOT LIABLE. To the fullest extent the law allows, the author is not liable for any loss or damage of any kind that results from using, or from not being able to use, this program. That includes lost or deleted files, lost data, damaged or unbootable systems, lost settings, lost programs, and lost time or money. It makes no difference whether the damage is direct or indirect, whether it comes from a mistake in the program, or whether the author was told it might happen. By using the program you accept this and agree not to hold the author responsible.
 * This project is independent. It is not made, endorsed or sponsored by Microsoft or any other company. Names such as Windows, Edge, Chrome and Firefox belong to their owners and are used only to say what the program works with.
 * Nothing here is legal, financial or professional advice.
+<!-- disclaimer:end -->
 
 If you do not agree with this, please do not use the program.
 
@@ -109,7 +111,7 @@ npm ci                    # installs the build tools
 node node_modules/electron/install.js   # downloads the Electron program (newer npm versions skip this step)
 npm start                 # run the app from source
 npm test                  # run the automated tests (about 700)
-npx electron-builder --win --x64   # builds the one-click installer and the portable program into .\release
+npx electron-builder --win --x64   # builds the setup wizard and the portable program into .\release
 powershell -File scripts\make-release-zip.ps1   # packs them into the release zip
 ```
 

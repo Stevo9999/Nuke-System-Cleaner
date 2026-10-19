@@ -11,12 +11,14 @@ NO INSTALL (run from anywhere, even a USB drive):  double-click  Nuke-Uninstalle
 Windows may show "Windows protected your PC" because the programs are not code-signed: click More info, then Run anyway.
 
 DISCLAIMER
+[disclaimer:start]
 - Nuke-Uninstaller is provided "as is", without any warranty. It is a free hobby project and you use it at your own risk.
 - It deletes files permanently. Deleted items do not go to the Recycle Bin. A Windows restore point can bring back Windows settings and installed programs, but it cannot bring back your personal files. Back up anything important before you use this program.
 - Uninstalling a program or removing a Windows app can stop other software that depends on it from working. Read each confirmation before you continue.
 - I AM NOT LIABLE. To the fullest extent the law allows, the author is not liable for any loss or damage of any kind that results from using, or from not being able to use, this program. That includes lost or deleted files, lost data, damaged or unbootable systems, lost settings, lost programs, and lost time or money. It makes no difference whether the damage is direct or indirect, whether it comes from a mistake in the program, or whether the author was told it might happen. By using the program you accept this and agree not to hold the author responsible.
 - This project is independent. It is not made, endorsed or sponsored by Microsoft or any other company. Names such as Windows, Edge, Chrome and Firefox belong to their owners and are used only to say what the program works with.
 - Nothing here is legal, financial or professional advice.
+[disclaimer:end]
 
 License: PolyForm Noncommercial 1.0.0 - free for noncommercial use, may not be sold (see LICENSE).
 Third-party licenses: THIRD_PARTY_NOTICES.md.

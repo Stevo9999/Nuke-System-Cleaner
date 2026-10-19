@@ -1,4 +1,4 @@
-﻿appId: local.nuke-uninstaller
+appId: local.nuke-uninstaller
 productName: Nuke-Uninstaller
 asar: false
 directories:

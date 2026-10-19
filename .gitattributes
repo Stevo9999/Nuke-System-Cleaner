@@ -1,2 +1,5 @@
 * text=auto eol=lf
 vendor/** -text
+*.bat text eol=crlf
+build/license.txt text eol=crlf
+scripts/release-extras/READ-ME-FIRST.txt text eol=crlf

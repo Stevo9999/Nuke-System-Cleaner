@@ -222,7 +222,7 @@ test("disk map is a modal dialog, the 3D page is inert while it is open, Close l
   assert.ok(/app\.inert = true/.test(viewSrc()) && /app\.inert = false/.test(viewSrc()));
   assert.ok(/\$\('#banner'\)\.replaceChildren\(document\.createTextNode\(/.test(viewSrc()));
   assert.ok(!/id="after"/.test(src));
-  assert.equal(fs.readFileSync(path.join(root, ".gitattributes"), "utf8").trim().replace(/\r/g, ""), "* text=auto eol=lf\nvendor/** -text");
+  assert.ok(fs.readFileSync(path.join(root, ".gitattributes"), "utf8").replace(/\r/g, "").startsWith("* text=auto eol=lf\nvendor/** -text\n"), "the two base rules stay first (later lines may add CRLF rules for Windows-only files)");
 });
 
 test("disk map: cells only for sized, non-refused, uncovered items; deletion shown only for server status deleted", () => {
