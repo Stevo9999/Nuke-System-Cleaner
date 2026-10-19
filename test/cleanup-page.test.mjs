@@ -198,6 +198,7 @@ test("accessibility and honesty notes are present; the verdict depends on result
   assert.equal([...script.matchAll(/DETONATED/g)].length, 1, "the word appears in one results-dependent place only");
 });
 
+const expSrc = () => script.slice(script.indexOf("/* explosion:begin */"), script.indexOf("/* explosion:end */"));
 const viewSrc = () => script.slice(script.indexOf("function showDiskMap"), script.indexOf("window.fmt = fmt"));
 
 test("disk map: layout is inlined (CSP-safe), no module fetch, no export", () => {
@@ -238,7 +239,7 @@ function runMap(info, done, { steps = [0, 1e6], reduced = false, close = false }
   const grab = re => re.exec(script)[0];
   const code = [grab(/function fmt\(b\) \{.*\}\n/), grab(/const cleanText = .*\n/), grab(/const short = .*\n/), grab(/const cleanPath = .*\n/), grab(/const put = .*\n/), grab(/const el = .*\n/),
     script.slice(script.indexOf("/* squarify:begin */"), script.indexOf("/* squarify:end */")),
-    grab(/const num = .*\n/), grab(/const normP = .*\n/), grab(/const CELL_CAP = .*\n/), grab(/const driveOf = .*\n/), viewSrc()].join("\n");
+    grab(/const num = .*\n/), grab(/const normP = .*\n/), grab(/const CELL_CAP = .*\n/), grab(/const driveOf = .*\n/), grab(/const clamp = .*\n/), expSrc(), viewSrc()].join("\n");
   const nodes = {}, draws = [], listeners = [], removed = [];
   const mk = sel => nodes[sel] ||= (() => {
     const n = { text: "", writes: 0, classList: { s: new Set(), add(c) { this.s.add(c); }, remove(c) { this.s.delete(c); } }, style: {}, children: [], inert: false,
@@ -251,7 +252,8 @@ function runMap(info, done, { steps = [0, 1e6], reduced = false, close = false }
     Object.defineProperty(n, "textContent", { get() { return this.text; }, set(v) { this.text = v; this.writes++; } });
     return n;
   })();
-  const doc = { body: mk("body"), createElement: () => ({ textContent: "", className: "" }), createTextNode: t => ({ textContent: t }) };
+  const atlasDraws = [];
+  const doc = { body: mk("body"), createElement: tag => tag === "canvas" ? { width: 0, height: 0, getContext: () => new Proxy({}, { get: (t, k) => k in t ? t[k] : (...a) => { atlasDraws.push({ m: k, a }); }, set: (t, k, v) => { t[k] = v; return true; } }) } : ({ textContent: "", className: "" }), createTextNode: t => ({ textContent: t }) };
   let frames = [];
   const ctx = vm.createContext({ $: mk, body: doc.body, info, doneEvent: done, document: doc, window: { matchMedia: true }, devicePixelRatio: 1, performance: { now: () => 0 }, Math, Number, Object, Array, String, Map,
     requestAnimationFrame: f => { frames.push(f); return frames.length; }, cancelAnimationFrame() { frames = []; },
@@ -262,7 +264,7 @@ function runMap(info, done, { steps = [0, 1e6], reduced = false, close = false }
   for (const t of steps) { const f = frames; frames = []; f.forEach(fn => fn(t * 1000)); }
   if (close) nodes["#mapclose"].onclick();
   const texts = draws.filter(d => d.m === "fillText").map(d => d.a[0]);
-  return { nodes, draws, texts, pending, listeners, removed, liveText: () => ["#verdict", "#freed", "#maptext", "#mapprog"].map(k => (nodes[k] || {}).text || "").join(" | ") };
+  return { nodes, draws, atlasDraws, texts, pending, listeners, removed, liveText: () => ["#verdict", "#freed", "#maptext", "#mapprog"].map(k => (nodes[k] || {}).text || "").join(" | ") };
 }
 const P = { big: String.raw`C:\w\big.bin`, keep: String.raw`C:\w\keep.txt`, inner: String.raw`C:\w\big.bin\inner.txt`, evil: String.raw`C:\evil\<b>x</b>`, zero: String.raw`C:\w\empty.txt` };
 const baseInfo = () => ({ items: [
@@ -275,7 +277,8 @@ const goodDone = (o = {}) => ({ freedBytes: 1100, sumBytes: 1000, measured: true
   res(P.big, "deleted", { bytes: 1000 }), res(P.keep, "failed", { reason: "EPERM" }), res(P.inner, "skipped", { reason: "already gone" }),
   res(P.evil, "skipped", { reason: "refused at launch: protected" }), res(P.zero, "deleted")], ...o });
 const cellCount = r => r.draws.filter(d => d.m === "fillRect" && /^hsl\(/.test(d.fs)).length;
-const sparks = r => r.draws.filter(d => d.m === "fillRect" && d.a[2] === 3 && d.a[3] === 3).length;
+const booms = r => r.draws.filter(d => d.m === "drawImage").length;   // fireball sprites drawn in this run
+const boomCentres = r => new Set(r.draws.filter(d => d.m === "drawImage").map(d => (d.a[5] + d.a[7] / 2) + "," + (d.a[6] + d.a[8] / 2)));
 const flashes = r => r.draws.filter(d => d.m === "fillRect" && /^rgba\(255,/.test(d.fs)).length;
 
 test("disk map run: real paths, differing totals, covered item is NOT counted as kept, cells only for sized/uncovered/non-refused items", () => {
@@ -318,10 +321,10 @@ test("disk map run: nothing deleted -> NOTHING DELETED, Nothing freed, no flash/
   assert.match(r.nodes["#maptext"].text, /No item was deleted\./); assert.match(r.nodes["#maptext"].text, /did not cause/);
   assert.ok(!/Freed /.test(r.liveText()) && !/measured, not estimated/.test(r.liveText()));
   assert.equal(r.nodes["#mapfill"].style.width, "0%");
-  assert.equal(sparks(r), 0, "no sparks"); assert.equal(flashes(r), 0, "no white flash");
+  assert.equal(booms(r), 0, "no explosion on cells that were not removed"); assert.equal(flashes(r), 0, "no white flash");
   assert.ok(r.texts.filter(t => /NOT removed: EBUSY/.test(t)).length >= 1);
-  const ok = runMap(baseInfo(), goodDone(), { steps: [1.8] });   // positive control: a deleted cell does flash and spark
-  assert.ok(flashes(ok) > 0 && sparks(ok) > 0);
+  const ok = runMap(baseInfo(), goodDone(), { steps: [1.8] });   // positive control: a deleted cell does flash and explode
+  assert.ok(flashes(ok) > 0 && booms(ok) > 0);
 });
 
 test("disk map run: statfs failure says free space could not be measured; never 'measured, not estimated' or 'differs'", () => {
@@ -367,7 +370,7 @@ test("disk map run: hostile numbers never produce NaN, Infinity or negative text
   assert.equal(runMap({ items: [{ path: "x", bytes: 1 }], drives: {} }, { measured: true, results: "nope" }).nodes["#verdict"].text, "NOTHING DELETED");
 });
 
-// A real run deleted 3585 items and the page froze: one cell, one spark burst and one log row per item. Budgets now hold for any size.
+// A real run deleted 3585 items and the page froze: one cell, one particle burst and one log row per item. Budgets now hold for any size.
 test("disk map run: 4000 items stay within the render budgets (<=300 cells + one 'other' cell, chunked and capped log) and the totals stay exact", () => {
   const N = 4000, items = [], results = [];
   let failed = 0, sum = 0;
@@ -400,9 +403,58 @@ test("disk map run: 4000 items stay within the render budgets (<=300 cells + one
   assert.ok(Math.abs(Number(/(\d+) NOT removed/.exec(aggText)[1]) - aggFail) <= 2);
 });
 
+// ---- smart explosions: an original procedural pixel-art fireball, at most 5 per map ----
+const loadExp = () => {
+  const c = vm.createContext({ Math, Uint8Array });
+  vm.runInContext(expSrc() + "\nthis.api = { explosionFrames, pickExplosions, EXP_N, EXP_PX, EXP_PAL, EXP_MAX, EXP_STAGGER };", c);
+  return c.api;
+};
+const frameHash = fr => crypto.createHash("sha256").update(Buffer.concat(fr.map(f => Buffer.from(f)))).digest("hex");
+test("explosion atlas: 12 frames of 64x64 virtual pixels, 6 palette steps, deterministic from the seed", () => {
+  const a = loadExp(), b = loadExp();
+  const fa = a.explosionFrames(), fb = b.explosionFrames();
+  assert.equal(fa.length, 12); assert.ok(fa.every(f => f.length === 64 * 64));
+  assert.equal(frameHash(fa), frameHash(fb), "same seed, same pixels, in two separate runs");
+  assert.equal(frameHash(fa), "40d170e38749dc8ba98d64a0d98e53288cd8df12f49ba3320e8b56b52ed37aab", "pinned atlas hash (changes only when the fireball look is changed on purpose)");
+  assert.notEqual(frameHash(fa), frameHash(a.explosionFrames(7)), "another seed gives another fireball");
+  assert.equal(a.EXP_PAL.length, 6);
+  const used = new Set(fa.flatMap(f => [...f])); assert.deepEqual([...used].sort(), [0, 1, 2, 3, 4, 5, 6], "transparent plus all six palette steps are used");
+  const px = fa.map(f => f.filter(v => v).length);
+  const peak = px.indexOf(Math.max(...px));
+  assert.ok(peak > 2 && peak < 10 && px[0] < px[peak] / 2 && px[11] < px[peak] / 2, "it grows, then dissolves: " + px.join(","));
+  assert.ok(fa.every(f => f[0] === 0 && f[63] === 0 && f[64 * 63] === 0 && f[64 * 64 - 1] === 0), "corners stay transparent");
+});
+test("explosions: hard cap of 5 for any size, only on deleted cells, spread out, staggered", () => {
+  const info4000 = [], res4000 = [];
+  for (let i = 0; i < 4000; i++) { const p = String.raw`C:\w\f` + i + ".bin", bytes = 1000 + ((i * 7919) % 5000); info4000.push({ path: p, bytes }); res4000.push(i % 97 === 0 ? res(p, "failed", { reason: "EBUSY" }) : res(p, "deleted", { bytes })); }
+  const steps = Array.from({ length: 80 }, (_, i) => i * 0.1).concat([1e6]);
+  const big = runMap({ items: info4000, drives: {} }, { freedBytes: 1, sumBytes: 1, measured: true, results: res4000 }, { steps });
+  assert.equal(boomCentres(big).size, 5, "exactly five fireball sites for 4000 items");
+  // never more than 5 at once, and never before the stagger allows
+  for (const t of [0, 1.7, 2.0, 2.4, 2.8, 3.3, 5]) assert.ok(booms(runMap({ items: info4000, drives: {} }, { freedBytes: 1, sumBytes: 1, measured: true, results: res4000 }, { steps: [t] })) <= 5);
+  const three = { items: [P.big, P.keep, P.zero].map((p, i) => ({ path: p, bytes: 100 * (i + 1) })), drives: {} };
+  const t3 = runMap(three, { freedBytes: 600, sumBytes: 600, measured: true, results: three.items.map(i => res(i.path, "deleted", { bytes: i.bytes })) }, { steps });
+  assert.equal(boomCentres(t3).size, 3, "three items, three explosions");
+  const centres = [...boomCentres(big)].map(s => s.split(",").map(Number));
+  for (let i = 0; i < centres.length; i++) for (let j = i + 1; j < centres.length; j++) assert.ok(Math.hypot(centres[i][0] - centres[j][0], centres[i][1] - centres[j][1]) >= 100, "spread out");
+  const sizes = big.draws.filter(d => d.m === "drawImage").map(d => d.a[7]);
+  assert.ok(sizes.every(s => s >= 128 && s <= 256 && s % 64 === 0), "scaled by whole numbers, clamped: " + [...new Set(sizes)]);
+  const none = runMap(three, { freedBytes: 0, sumBytes: 0, measured: true, results: three.items.map(i => res(i.path, "failed", { reason: "x" })) }, { steps });
+  assert.equal(booms(none), 0, "failed cells never explode");
+  const mixed = runMap(three, { freedBytes: 100, sumBytes: 100, measured: true, results: [res(P.big, "deleted", { bytes: 100 }), res(P.keep, "failed", { reason: "x" }), res(P.zero, "failed", { reason: "x" })] }, { steps });
+  assert.equal(boomCentres(mixed).size, 1, "only the one deleted cell explodes");
+});
+test("explosion code: the spark particle system is gone; the sprite is generated, never loaded", () => {
+  assert.ok(!/seedSparks|SPARK_BUDGET|\bparts\.push|hsla\(/.test(viewSrc()), "no per-cell sparks left");
+  assert.ok(!/spark/i.test(script.slice(script.indexOf("/* explosion:begin */"), script.indexOf("window.fmt = fmt"))), "no spark wording or code in the result view");
+  assert.doesNotMatch(expSrc(), /new Image|\.src\s*=|\.gif|\.png|fetch\(|Math\.random/, "no image files, and no unseeded randomness in the sprite");
+  assert.match(viewSrc(), /imageSmoothingEnabled = false/);
+  assert.match(viewSrc(), /prefers-reduced-motion|reduced \? 5/);
+});
+
 test("disk map run: reduced motion draws the final state once and queues no animation frame", () => {
   const r = runMap(baseInfo(), goodDone(), { steps: [], reduced: true });
-  assert.equal(r.pending(), 0); assert.equal(sparks(r), 0);
+  assert.equal(r.pending(), 0); assert.ok(booms(r) <= 5, "reduced motion: at most one static, faded frame per fireball site, no animation");
   assert.equal(r.nodes["#verdict"].text, "DETONATED"); assert.ok(r.nodes["#mapclose"].classList.s.has("ready"));
 });
 
