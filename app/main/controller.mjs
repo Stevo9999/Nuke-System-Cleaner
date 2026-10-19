@@ -170,6 +170,15 @@ export function createController({
   // The account SID is derived here from the identity read at startup; nothing from a renderer can set it.
   const sid = identity && typeof identity.sid === "string" && SID_USER.test(identity.sid) ? identity.sid : null;
   const appProtected = Array.isArray(protectedPaths) ? protectedPaths.filter(p => typeof p === "string") : [];
+  // The built-in protected list keeps your personal folders (Desktop, Documents, Pictures, Music, Videos, Downloads, OneDrive, ...)
+  // out of every scan. When YOU pick one file or folder by hand INSIDE one of them, that folder no longer blocks the pick: only the
+  // protected folders that strictly contain the picked item are dropped for that investigation. The folder itself, and any other
+  // protected folder, stay protected; your own never-touch folders (Settings) are never dropped.
+  const protectedFor = request => {
+    if (!request || request.kind !== "investigate" || typeof request.target !== "string" || !path.isAbsolute(request.target)) return appProtected;
+    const t = nk(request.target);
+    return appProtected.filter(q => { try { const n = nk(q); return !(t !== n && within(request.target, q)); } catch { return true; } });
+  };
 
   let programById = new Map(); // id -> program entry (kept here; a renderer only ever holds the id)
   let appById = new Map();
@@ -204,7 +213,7 @@ export function createController({
     if (request.kind === "startup") return {};
     if (request.kind === "browsers") return { protectedPaths: excl };
     return request.kind === "smart" ? (elevated ? { sid, elevated: true, protectedPaths: excl } : { sid, protectedPaths: excl })
-      : { target: request.target, protectedPaths: [...appProtected, ...excl] };
+      : { target: request.target, protectedPaths: [...protectedFor(request), ...excl] };
   }
 
   async function scan(request) {
@@ -381,6 +390,7 @@ export function createController({
     try { confirmed = (await ui.confirmPermanent()) === true; } catch { confirmed = false; }
     if (!confirmed) return { ok: false, cancelled: true };
     const result = last.result;
+    const request = last.request;
     const scanStartMs = last.scanStartMs;
     last = null; // from here on this scan is used up: a new delete needs a new scan
     try { ui.closeResults(); } catch { /* already closed */ }
@@ -410,7 +420,7 @@ export function createController({
         sessionId: "nuke-uninstaller",
         items: result.items.map(i => ({ id: i.id, group: i.group, path: i.path, sharedWith: Array.isArray(i.sharedWith) ? i.sharedWith : [] })),
         allowedRoots: Array.isArray(result.allowedRoots) ? result.allowedRoots : [],
-        protectedPaths: [...appProtected, ...excl, ...(Array.isArray(result.protectedPaths) ? result.protectedPaths : [])],
+        protectedPaths: [...protectedFor(request), ...excl, ...(Array.isArray(result.protectedPaths) ? result.protectedPaths : [])],
         livePaths: [],
       };
       const ids = chosen.map(i => i.id);
